@@ -1,0 +1,7 @@
+cod_cliente,primeiro_nome,ultimo_nome,email,tipo_cliente,data_inclusao,cpfcnpj,data_nascimento,endereco,cep
+101,Mariana,Silva,mariana.silva@email.com,PF,2018-01-10,12345678901,1989-04-20,Rua A 10,11000000
+102,Carlos,Souza,carlos.souza@email.com,PF,2019-05-21,23456789012,1978-08-11,Rua B 20,22000000
+103,Empresa Alfa,Ltda,contato@alfa.com,PJ,2020-02-03,34567890000199,2005-01-01,Av Comercial 300,33000000
+104,Fernanda,Lima,fernanda.lima@email.com,PF,2021-07-14,45678901234,1992-12-01,Rua C 40,44000000
+105,João,Pereira,joao.pereira@email.com,PF,2022-10-05,56789012345,1985-03-30,Rua D 50,55000000
+106,Patricia,Oliveira,patricia.oliveira@email.com,PF,2022-12-18,67890123456,1995-09-15,Rua E 60,66000000

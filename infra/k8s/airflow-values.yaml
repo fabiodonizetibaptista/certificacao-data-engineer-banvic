@@ -1,0 +1,61 @@
+executor: LocalExecutor
+
+images:
+  airflow:
+    repository: banvic-airflow-meltano
+    tag: 0.3.0
+    pullPolicy: Never
+
+webserver:
+  defaultUser:
+    enabled: true
+    role: Admin
+    username: admin
+    email: admin@example.com
+    firstName: BanVic
+    lastName: Admin
+    password: admin
+
+postgresql:
+  enabled: true
+
+redis:
+  enabled: false
+
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+
+logs:
+  persistence:
+    enabled: false
+
+workers:
+  persistence:
+    enabled: false
+
+triggerer:
+  persistence:
+    enabled: false
+
+env:
+  - name: TARGET_POSTGRES_HOST
+    value: postgres
+  - name: TARGET_POSTGRES_PORT
+    value: "5432"
+  - name: TARGET_POSTGRES_DATABASE
+    value: banvic_dw
+  - name: TARGET_POSTGRES_USER
+    value: banvic_user
+  - name: TARGET_POSTGRES_PASSWORD
+    value: banvic_password
+
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false

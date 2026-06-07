@@ -1,0 +1,39 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+*.env
+meltano_project/.env
+
+# Meltano local state
+meltano_project/.meltano/
+meltano_project/output/
+
+# Logs
+logs/
+*.log
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Docker / local temp
+*.tmp
+
+# Extracted/raw challenge material not required for final delivery
+data/extracted/
+
+# Local backups
+*.bak
+
+# Legacy/local input files not used by the final Meltano pipeline
+data/input/banvic/
+data/input/banvic_data.zip
+
+# Legacy scripts and archived DAGs not used by the final solution
+scripts/load_csv_to_postgres.py
+docs/archive/legacy_dags/

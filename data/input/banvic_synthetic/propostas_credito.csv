@@ -1,0 +1,7 @@
+cod_proposta,cod_cliente,cod_colaborador,data_entrada_proposta,taxa_juros_mensal,valor_proposta,valor_financiamento,valor_entrada,valor_prestacao,quantidade_parcelas,carencia,status_proposta
+9001,101,201,2022-01-10 09:00:00,1.2,10000.0,8000.0,2000.0,750.0,12,0,Aprovada
+9002,102,202,2022-03-15 10:30:00,1.8,5000.0,5000.0,0.0,480.0,12,1,Aprovada
+9003,103,203,2022-05-20 14:45:00,2.1,50000.0,40000.0,10000.0,3900.0,12,2,Em análise
+9004,104,204,2022-08-01 16:00:00,2.5,3000.0,3000.0,0.0,310.0,10,0,Recusada
+9005,105,202,2022-11-12 11:20:00,1.4,15000.0,12000.0,3000.0,1150.0,12,0,Aprovada
+9006,106,201,2023-01-05 15:35:00,1.95,8000.0,7000.0,1000.0,690.0,12,1,Em análise

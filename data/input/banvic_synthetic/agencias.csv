@@ -1,0 +1,6 @@
+cod_agencia,nome,endereco,cidade,uf,data_abertura,tipo_agencia
+1,Agência Paulista,Av Paulista 1000,São Paulo,SP,2010-01-01,Fisica
+2,Agência Campinas,Rua Centro 200,Campinas,SP,2012-03-15,Fisica
+3,Agência Porto Alegre,Av Ipiranga 300,Porto Alegre,RS,2015-06-10,Fisica
+4,Agência Digital,Online,São Paulo,SP,2020-11-01,Digital
+5,Agência Curitiba,Rua XV 500,Curitiba,PR,2018-09-20,Fisica

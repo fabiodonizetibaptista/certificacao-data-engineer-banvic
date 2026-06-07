@@ -1,0 +1,71 @@
+default_environment: dev
+project_id: 019e7ad1-4a61-7fd2-b40f-c762567ff2bb
+
+environments:
+- name: dev
+- name: staging
+- name: prod
+
+plugins:
+  extractors:
+  - name: tap-csv
+    variant: meltanolabs
+    pip_url: git+https://github.com/MeltanoLabs/tap-csv.git
+    config:
+      files:
+      - entity: agencias
+        path: ../data/input/banvic_synthetic/agencias.csv
+        keys:
+        - cod_agencia
+        encoding: UTF-8
+
+      - entity: clientes
+        path: ../data/input/banvic_synthetic/clientes.csv
+        keys:
+        - cod_cliente
+        encoding: UTF-8
+
+      - entity: colaboradores
+        path: ../data/input/banvic_synthetic/colaboradores.csv
+        keys:
+        - cod_colaborador
+        encoding: UTF-8
+
+      - entity: colaborador_agencia
+        path: ../data/input/banvic_synthetic/colaborador_agencia.csv
+        keys:
+        - cod_colaborador
+        - cod_agencia
+        encoding: UTF-8
+
+      - entity: contas
+        path: ../data/input/banvic_synthetic/contas.csv
+        keys:
+        - num_conta
+        encoding: UTF-8
+
+      - entity: transacoes
+        path: ../data/input/banvic_synthetic/transacoes.csv
+        keys:
+        - cod_transacao
+        encoding: UTF-8
+
+      - entity: propostas_credito
+        path: ../data/input/banvic_synthetic/propostas_credito.csv
+        keys:
+        - cod_proposta
+        encoding: UTF-8
+
+  loaders:
+  - name: target-postgres
+    variant: meltanolabs
+    pip_url: meltanolabs-target-postgres
+    config:
+      host: ${TARGET_POSTGRES_HOST}
+      port: ${TARGET_POSTGRES_PORT}
+      database: ${TARGET_POSTGRES_DATABASE}
+      user: ${TARGET_POSTGRES_USER}
+      password: ${TARGET_POSTGRES_PASSWORD}
+      default_target_schema: raw_banvic
+      load_method: overwrite
+      use_copy: true

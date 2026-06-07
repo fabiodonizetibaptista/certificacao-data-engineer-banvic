@@ -1,0 +1,6 @@
+cod_colaborador,primeiro_nome,ultimo_nome,email,cpf,data_nascimento,endenreco,cep
+201,Ana,Costa,ana.costa@banvic.com,11122233344,1982-02-12,Rua Banco 1,10000000
+202,Bruno,Martins,bruno.martins@banvic.com,22233344455,1987-06-25,Rua Banco 2,20000000
+203,Camila,Diniz,camila.diniz@banvic.com,33344455566,1980-09-09,Rua Banco 3,30000000
+204,Lucas,Johnson,lucas.johnson@banvic.com,44455566677,1993-11-22,Rua Banco 4,40000000
+205,André,Tech,andre.tech@banvic.com,55566677788,1979-01-18,Rua Banco 5,50000000

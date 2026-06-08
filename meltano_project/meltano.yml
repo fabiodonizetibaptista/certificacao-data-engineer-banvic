@@ -14,44 +14,44 @@ plugins:
     config:
       files:
       - entity: agencias
-        path: ../data/input/banvic_synthetic/agencias.csv
+        path: ../data/input/banvic_raw/agencias.csv
         keys:
         - cod_agencia
         encoding: UTF-8
 
       - entity: clientes
-        path: ../data/input/banvic_synthetic/clientes.csv
+        path: ../data/input/banvic_raw/clientes.csv
         keys:
         - cod_cliente
         encoding: UTF-8
 
       - entity: colaboradores
-        path: ../data/input/banvic_synthetic/colaboradores.csv
+        path: ../data/input/banvic_raw/colaboradores.csv
         keys:
         - cod_colaborador
         encoding: UTF-8
 
       - entity: colaborador_agencia
-        path: ../data/input/banvic_synthetic/colaborador_agencia.csv
+        path: ../data/input/banvic_raw/colaborador_agencia.csv
         keys:
         - cod_colaborador
         - cod_agencia
         encoding: UTF-8
 
       - entity: contas
-        path: ../data/input/banvic_synthetic/contas.csv
+        path: ../data/input/banvic_raw/contas.csv
         keys:
         - num_conta
         encoding: UTF-8
 
       - entity: transacoes
-        path: ../data/input/banvic_synthetic/transacoes.csv
+        path: ../data/input/banvic_raw/transacoes.csv
         keys:
         - cod_transacao
         encoding: UTF-8
 
       - entity: propostas_credito
-        path: ../data/input/banvic_synthetic/propostas_credito.csv
+        path: ../data/input/banvic_raw/propostas_credito.csv
         keys:
         - cod_proposta
         encoding: UTF-8

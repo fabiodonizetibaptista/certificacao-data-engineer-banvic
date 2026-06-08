@@ -3,7 +3,7 @@ executor: LocalExecutor
 images:
   airflow:
     repository: banvic-airflow-meltano
-    tag: 0.3.0
+    tag: 0.4.0
     pullPolicy: Never
 
 webserver:

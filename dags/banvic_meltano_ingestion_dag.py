@@ -9,7 +9,7 @@ from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
-DATA_DIR = Path("/opt/airflow/data/input/banvic_synthetic")
+DATA_DIR = Path("/opt/airflow/data/input/banvic_raw")
 RAW_SCHEMA_NAME = "raw_banvic"
 CONTROL_SCHEMA_NAME = "control_banvic"
 AUDIT_TABLE_NAME = "ingestion_audit"

@@ -1,7 +1,7 @@
 from pathlib import Path
 import csv
 
-OUTPUT_DIR = Path("data/input/banvic_synthetic")
+OUTPUT_DIR = Path("data/input/banvic_raw")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

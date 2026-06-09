@@ -30,18 +30,94 @@ A solução contempla:
 A arquitetura implementada segue o fluxo abaixo:
 
 ```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Inter, Arial, sans-serif",
+    "background": "#ffffff",
+    "primaryColor": "#EAF2FF",
+    "primaryTextColor": "#102A43",
+    "primaryBorderColor": "#2563EB",
+    "lineColor": "#334155",
+    "secondaryColor": "#F8FAFC",
+    "tertiaryColor": "#DBEAFE"
+  }
+}}%%
+
 flowchart LR
-    A[Arquivos BanVic<br/>data/input/banvic_raw] --> B[Meltano<br/>tap-csv]
-    B --> C[Meltano<br/>target-postgres]
-    C --> D[(PostgreSQL<br/>schema raw_banvic)]
 
-    E[Apache Airflow<br/>DAG banvic_meltano_ingestion] --> F[Validação dos arquivos]
-    F --> G[Recriação idempotente do schema raw_banvic]
-    G --> H[Execução Meltano]
-    H --> I[Validação das tabelas carregadas]
-    I --> J[(Tabela de auditoria<br/>control_banvic.ingestion_audit)]
+    subgraph SRC["Sources"]
+        direction TB
+        ZIP["banvic_data.zip"]
+        CSV["7 CSV files<br/>agencias, clientes, contas,<br/>colaboradores, propostas_credito,<br/>transacoes"]
+    end
 
-    E --> B
+    subgraph ORCH["Orchestration"]
+        direction TB
+        AIRFLOW["Apache Airflow<br/>DAG: banvic_meltano_ingestion"]
+        SENSOR["Source file validation<br/>availability and size checks"]
+        RETRIES["Retries<br/>2 attempts on failure"]
+    end
+
+    subgraph ING["Ingestion / ELT"]
+        direction TB
+        MELTANO["Meltano"]
+        TAP["Extractor<br/>tap-csv"]
+        TARGET["Loader<br/>target-postgres"]
+    end
+
+    subgraph STORAGE["Data Storage"]
+        direction TB
+
+        subgraph DWH["PostgreSQL Data Warehouse"]
+            RAW["Schema: raw_banvic<br/>centralized ERP tables"]
+            CONTROL["Schema: control_banvic<br/>ingestion_audit"]
+        end
+    end
+
+    subgraph GOV["Governance & Reliability"]
+        direction TB
+        IDEMP["Idempotency<br/>recreate raw schema before load"]
+        AUDIT["Operational audit<br/>run_id, task_id, status,<br/>table_name, row_count"]
+        SECRETS["Secrets management<br/>environment variables"]
+    end
+
+    subgraph VALID["Validation"]
+        direction TB
+        SQLRAW["validate_raw_counts.sql"]
+        SQLAUDIT["validate_audit_events.sql"]
+    end
+
+    SRC --> ORCH
+    AIRFLOW --> SENSOR
+    SENSOR --> MELTANO
+    MELTANO --> TAP
+    TAP --> TARGET
+    TARGET --> RAW
+
+    AIRFLOW --> IDEMP
+    AIRFLOW --> RETRIES
+    AIRFLOW --> AUDIT
+    IDEMP --> RAW
+    AUDIT --> CONTROL
+    SECRETS --> TARGET
+
+    RAW --> SQLRAW
+    CONTROL --> SQLAUDIT
+
+    classDef source fill:#EFF6FF,stroke:#2563EB,stroke-width:2px,color:#0F172A;
+    classDef orchestration fill:#ECFEFF,stroke:#0891B2,stroke-width:2px,color:#0F172A;
+    classDef ingestion fill:#F0FDF4,stroke:#16A34A,stroke-width:2px,color:#0F172A;
+    classDef storage fill:#FFF7ED,stroke:#EA580C,stroke-width:2px,color:#0F172A;
+    classDef governance fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#0F172A;
+    classDef validation fill:#FEFCE8,stroke:#CA8A04,stroke-width:2px,color:#0F172A;
+
+    class ZIP,CSV source;
+    class AIRFLOW,SENSOR,RETRIES orchestration;
+    class MELTANO,TAP,TARGET ingestion;
+    class RAW,CONTROL storage;
+    class IDEMP,AUDIT,SECRETS governance;
+    class SQLRAW,SQLAUDIT validation;
 ```
 
 ### Componentes principais

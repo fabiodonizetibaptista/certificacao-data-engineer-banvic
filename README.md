@@ -163,8 +163,6 @@ flowchart LR
 │   ├── meltano.yml
 │   ├── requirements.txt
 │   └── plugins/
-├── scripts/
-│   └── generate_synthetic_banvic_data.py
 ├── sql/
 │   ├── validate_audit_events.sql
 │   └── validate_raw_counts.sql

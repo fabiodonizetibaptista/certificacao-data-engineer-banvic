@@ -27,7 +27,7 @@ A solução contempla:
 
 ## 2. Arquitetura da Solução
 
-A arquitetura implementada segue o fluxo abaixo:
+A arquitetura implementada está organizada em camadas, separando o fluxo principal de dados das camadas de suporte operacional:
 
 ```mermaid
 %%{init: {
@@ -35,89 +35,114 @@ A arquitetura implementada segue o fluxo abaixo:
   "themeVariables": {
     "fontFamily": "Inter, Arial, sans-serif",
     "background": "#ffffff",
-    "primaryColor": "#EAF2FF",
-    "primaryTextColor": "#102A43",
-    "primaryBorderColor": "#2563EB",
-    "lineColor": "#334155",
-    "secondaryColor": "#F8FAFC",
-    "tertiaryColor": "#DBEAFE"
+    "primaryColor": "#F8FAFC",
+    "primaryTextColor": "#0F172A",
+    "primaryBorderColor": "#CBD5E1",
+    "lineColor": "#475569"
   }
 }}%%
 
-flowchart LR
+flowchart TB
 
-    subgraph SRC["Sources"]
-        direction TB
-        ZIP["banvic_data.zip"]
-        CSV["7 CSV files<br/>agencias, clientes, contas,<br/>colaboradores, propostas_credito,<br/>transacoes"]
+    subgraph MAIN["DATA PIPELINE"]
+        direction LR
+
+        subgraph SOURCES["Sources"]
+            direction TB
+            SRC1["banvic_data.zip"]
+            SRC2["7 CSV files<br/>ERP table copies"]
+        end
+
+        subgraph INGESTION["Ingestion / ELT"]
+            direction TB
+            ING1["Meltano"]
+            ING2["tap-csv<br/>extract"]
+            ING3["target-postgres<br/>load"]
+        end
+
+        subgraph STORAGE["Data Storage"]
+            direction TB
+            STG1["PostgreSQL"]
+            STG2["raw_banvic<br/>centralized raw tables"]
+            STG3["control_banvic<br/>ingestion_audit"]
+        end
+
+        subgraph VALIDATION["Validation"]
+            direction TB
+            VAL1["validate_raw_counts.sql"]
+            VAL2["validate_audit_events.sql"]
+        end
+
+        SOURCES --> INGESTION --> STORAGE --> VALIDATION
     end
 
-    subgraph ORCH["Orchestration"]
-        direction TB
-        AIRFLOW["Apache Airflow<br/>DAG: banvic_meltano_ingestion"]
-        SENSOR["Source file validation<br/>availability and size checks"]
-        RETRIES["Retries<br/>2 attempts on failure"]
-    end
+    subgraph SUPPORT["OPERATIONAL SUPPORT"]
+        direction LR
 
-    subgraph ING["Ingestion / ELT"]
-        direction TB
-        MELTANO["Meltano"]
-        TAP["Extractor<br/>tap-csv"]
-        TARGET["Loader<br/>target-postgres"]
-    end
+        subgraph ORCH["Orchestration"]
+            direction TB
+            ORCH1["Apache Airflow"]
+            ORCH2["DAG<br/>banvic_meltano_ingestion"]
+            ORCH3["Task dependencies"]
+            ORCH4["Retries"]
+        end
 
-    subgraph STORAGE["Data Storage"]
-        direction TB
+        subgraph REL["Reliability"]
+            direction TB
+            REL1["Source file validation"]
+            REL2["Idempotent load"]
+            REL3["Recreate raw schema<br/>before each run"]
+        end
 
-        subgraph DWH["PostgreSQL Data Warehouse"]
-            RAW["Schema: raw_banvic<br/>centralized ERP tables"]
-            CONTROL["Schema: control_banvic<br/>ingestion_audit"]
+        subgraph GOV["Governance & Evidence"]
+            direction TB
+            GOV1["Operational audit"]
+            GOV2["run_id, task_id, status"]
+            GOV3["table_name, row_count"]
+        end
+
+        subgraph SEC["Security"]
+            direction TB
+            SEC1["Environment variables"]
+            SEC2["No local secrets<br/>committed to Git"]
         end
     end
 
-    subgraph GOV["Governance & Reliability"]
-        direction TB
-        IDEMP["Idempotency<br/>recreate raw schema before load"]
-        AUDIT["Operational audit<br/>run_id, task_id, status,<br/>table_name, row_count"]
-        SECRETS["Secrets management<br/>environment variables"]
+    subgraph INFRA["LOCAL INFRASTRUCTURE"]
+        direction LR
+        INF1["Docker"]
+        INF2["Custom Airflow image<br/>with Meltano"]
+        INF3["Kind / Kubernetes"]
+        INF4["Helm"]
+        INF5["PostgreSQL deployment"]
     end
 
-    subgraph VALID["Validation"]
-        direction TB
-        SQLRAW["validate_raw_counts.sql"]
-        SQLAUDIT["validate_audit_events.sql"]
-    end
+    ORCH -. orchestrates .-> INGESTION
+    REL -. protects .-> INGESTION
+    GOV -. records evidence .-> STG3
+    SEC -. supports .-> INGESTION
+    INFRA -. runs .-> MAIN
+    INFRA -. runs .-> SUPPORT
 
-    SRC --> ORCH
-    AIRFLOW --> SENSOR
-    SENSOR --> MELTANO
-    MELTANO --> TAP
-    TAP --> TARGET
-    TARGET --> RAW
+    classDef sources fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#0F172A;
+    classDef ingestion fill:#DCFCE7,stroke:#16A34A,stroke-width:2px,color:#0F172A;
+    classDef storage fill:#FFEDD5,stroke:#EA580C,stroke-width:2px,color:#0F172A;
+    classDef validation fill:#FEF9C3,stroke:#CA8A04,stroke-width:2px,color:#0F172A;
+    classDef support fill:#E0F2FE,stroke:#0284C7,stroke-width:2px,color:#0F172A;
+    classDef reliability fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#0F172A;
+    classDef governance fill:#E2E8F0,stroke:#64748B,stroke-width:2px,color:#0F172A;
+    classDef security fill:#FCE7F3,stroke:#DB2777,stroke-width:2px,color:#0F172A;
+    classDef infra fill:#F1F5F9,stroke:#475569,stroke-width:2px,color:#0F172A;
 
-    AIRFLOW --> IDEMP
-    AIRFLOW --> RETRIES
-    AIRFLOW --> AUDIT
-    IDEMP --> RAW
-    AUDIT --> CONTROL
-    SECRETS --> TARGET
-
-    RAW --> SQLRAW
-    CONTROL --> SQLAUDIT
-
-    classDef source fill:#EFF6FF,stroke:#2563EB,stroke-width:2px,color:#0F172A;
-    classDef orchestration fill:#ECFEFF,stroke:#0891B2,stroke-width:2px,color:#0F172A;
-    classDef ingestion fill:#F0FDF4,stroke:#16A34A,stroke-width:2px,color:#0F172A;
-    classDef storage fill:#FFF7ED,stroke:#EA580C,stroke-width:2px,color:#0F172A;
-    classDef governance fill:#F5F3FF,stroke:#7C3AED,stroke-width:2px,color:#0F172A;
-    classDef validation fill:#FEFCE8,stroke:#CA8A04,stroke-width:2px,color:#0F172A;
-
-    class ZIP,CSV source;
-    class AIRFLOW,SENSOR,RETRIES orchestration;
-    class MELTANO,TAP,TARGET ingestion;
-    class RAW,CONTROL storage;
-    class IDEMP,AUDIT,SECRETS governance;
-    class SQLRAW,SQLAUDIT validation;
+    class SRC1,SRC2 sources;
+    class ING1,ING2,ING3 ingestion;
+    class STG1,STG2,STG3 storage;
+    class VAL1,VAL2 validation;
+    class ORCH1,ORCH2,ORCH3,ORCH4 support;
+    class REL1,REL2,REL3 reliability;
+    class GOV1,GOV2,GOV3 governance;
+    class SEC1,SEC2 security;
+    class INF1,INF2,INF3,INF4,INF5 infra;
 ```
 
 ### Componentes principais
@@ -307,6 +332,8 @@ Dessa forma, em caso de falha transitória, o Airflow realiza novas tentativas a
 
 As credenciais não são expostas diretamente no código da DAG.
 
+Para esta POC local, algumas credenciais de demonstração podem existir em arquivos de configuração do ambiente Kubernetes/Airflow. Em um ambiente produtivo, esses valores devem ser substituídos por mecanismos apropriados de gerenciamento de segredos, como Kubernetes Secrets, Vault, Secret Manager ou serviço equivalente.
+
 A configuração do `target-postgres` utiliza variáveis de ambiente no `meltano.yml`:
 
 ```yaml
@@ -483,13 +510,13 @@ Resultado esperado:
 ```text
        tabela        | registros 
 ---------------------+-----------
- agencias            |         5
- clientes            |         6
- colaborador_agencia |         7
- colaboradores       |         5
- contas              |         6
- propostas_credito   |         6
- transacoes          |         8
+ agencias            |        10
+ clientes            |       998
+ colaborador_agencia |       100
+ colaboradores       |       100
+ contas              |       999
+ propostas_credito   |      2000
+ transacoes          |     71999
 ```
 
 ---

@@ -17,31 +17,31 @@ AUDIT_TABLE_NAME = "ingestion_audit"
 EXPECTED_FILES = {
     "agencias": {
         "path": DATA_DIR / "agencias.csv",
-        "expected_rows": 5,
+        "expected_rows": 10,
     },
     "clientes": {
         "path": DATA_DIR / "clientes.csv",
-        "expected_rows": 6,
+        "expected_rows": 998,
     },
     "colaborador_agencia": {
         "path": DATA_DIR / "colaborador_agencia.csv",
-        "expected_rows": 7,
+        "expected_rows": 100,
     },
     "colaboradores": {
         "path": DATA_DIR / "colaboradores.csv",
-        "expected_rows": 5,
+        "expected_rows": 100,
     },
     "contas": {
         "path": DATA_DIR / "contas.csv",
-        "expected_rows": 6,
+        "expected_rows": 999,
     },
     "propostas_credito": {
         "path": DATA_DIR / "propostas_credito.csv",
-        "expected_rows": 6,
+        "expected_rows": 2000,
     },
     "transacoes": {
         "path": DATA_DIR / "transacoes.csv",
-        "expected_rows": 8,
+        "expected_rows": 71999,
     },
 }
 
@@ -279,7 +279,7 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
-    tags=["banvic", "meltano", "tap-csv", "target-postgres", "synthetic-data", "audit"],
+    tags=["banvic", "meltano", "tap-csv", "target-postgres", "raw-data", "audit"],
     default_args={
         "owner": "banvic-data-engineering",
         "retries": 2,

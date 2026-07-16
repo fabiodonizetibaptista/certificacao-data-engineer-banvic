@@ -516,23 +516,7 @@ https://github.com/fabio-baptista/certificacao-data-engineer
 
 ---
 
-## 16. Roteiro Sugerido para o Vídeo
-
-Para a apresentação final de 3 a 5 minutos, recomenda-se seguir este roteiro:
-
-1. Apresentar rapidamente o objetivo do desafio.
-2. Mostrar a arquitetura no README.
-3. Mostrar a estrutura de pastas do projeto.
-4. Explicar a DAG `banvic_meltano_ingestion`.
-5. Mostrar o ambiente Kubernetes com `kubectl get pods -n banvic`.
-6. Abrir a interface do Airflow e mostrar a DAG executada com sucesso.
-7. Executar ou mostrar a validação das contagens em `raw_banvic`.
-8. Mostrar a tabela de auditoria com os eventos da execução.
-9. Finalizar explicando idempotência, retries e segurança de credenciais.
-
----
-
-## 17. Conclusão
+## 16. Conclusão
 
 A solução entrega uma POC funcional de engenharia de dados para o BanVic, cobrindo infraestrutura local com Kubernetes, orquestração com Airflow, ingestão com Meltano, armazenamento em PostgreSQL, validação de dados e auditoria operacional.
 

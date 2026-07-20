@@ -37,3 +37,8 @@ data/input/banvic_data.zip
 # Legacy scripts and archived DAGs not used by the final solution
 scripts/load_csv_to_postgres.py
 docs/archive/legacy_dags/
+
+# Local Kubernetes/Helm overrides containing credentials
+infra/k8s/*.local.yaml
+infra/k8s/*.local.yml
+infra/k8s/*.local.env

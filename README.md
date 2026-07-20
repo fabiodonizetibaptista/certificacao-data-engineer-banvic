@@ -1,52 +1,66 @@
-# Certificação Data Engineer - BanVic
+# Certificação Data Engineer — BanVic
 
-Este repositório contém a solução desenvolvida para o desafio **Certificação Data Engineer by Indicium**, com foco na construção de uma POC de infraestrutura e pipeline de ingestão de dados para o Banco Vitória S.A. (BanVic).
+Este repositório contém a solução desenvolvida para o desafio **Certificação Data Engineer by Indicium**, com foco na construção de uma prova de conceito reprodutível de infraestrutura e ingestão de dados para o Banco Vitória S.A. (BanVic).
 
-A solução implementa um ambiente local em Kubernetes com Apache Airflow, PostgreSQL e Meltano, permitindo a ingestão centralizada das 7 tabelas disponibilizadas para o desafio.
+A solução executa localmente em Kubernetes com **Kind**, utiliza **Apache Airflow 3.2.2** para orquestração, **Meltano 4.2.0** para ELT e **PostgreSQL 16** como destino centralizado dos dados.
 
----
+## 1. Objetivo do projeto
 
-## 1. Objetivo do Projeto
-
-O objetivo do projeto é construir uma infraestrutura local reprodutível para ingestão de dados do BanVic, permitindo que analistas consumam os dados em um ambiente centralizado.
+O objetivo é disponibilizar uma infraestrutura local, segura e reproduzível para ingerir e centralizar as sete tabelas fornecidas no desafio BanVic.
 
 A solução contempla:
 
-* Provisionamento de infraestrutura local com Kubernetes.
-* Execução do Apache Airflow em ambiente conteinerizado.
-* Uso de PostgreSQL como destino analítico centralizado.
-* Ingestão ELT com Meltano.
-* Orquestração da carga via DAG no Airflow.
-* Validação de arquivos de entrada antes da ingestão.
-* Validação das tabelas carregadas no destino.
-* Auditoria de execução do pipeline.
-* Estratégia de idempotência e retries.
-* Scripts SQL de apoio para validação da carga e auditoria.
+- provisionamento de infraestrutura local em Kubernetes;
+- execução do Airflow em ambiente conteinerizado;
+- ingestão ELT com Meltano, `tap-csv` e `target-postgres`;
+- armazenamento centralizado em PostgreSQL;
+- validação quantitativa dos arquivos antes da carga;
+- validação das tabelas após a carga;
+- auditoria operacional por execução, task e tabela;
+- retries e callbacks para início, sucesso, nova tentativa e falha do Meltano;
+- idempotência por recriação controlada do schema de destino;
+- gerenciamento de credenciais com Kubernetes Secrets;
+- scripts SQL para validação dos dados e da auditoria.
 
----
-
-## 2. Arquitetura da Solução
-
-A arquitetura implementada está organizada em camadas, separando o fluxo principal de dados das camadas de suporte operacional:
+## 2. Arquitetura da solução
 
 ![Arquitetura da solução BanVic](docs/images/banvic-data-architecture.png)
 
-### Componentes principais
+A arquitetura separa o fluxo de dados das responsabilidades operacionais.
 
-| Componente      | Papel na solução                                   |
-| --------------- | -------------------------------------------------- |
-| Kind/Kubernetes | Ambiente local de orquestração de containers       |
-| Docker          | Build da imagem customizada do Airflow com Meltano |
-| Apache Airflow  | Orquestração do pipeline de ingestão               |
-| Meltano         | Execução do processo ELT                           |
-| tap-csv         | Extração dos arquivos CSV do BanVic                |
-| target-postgres | Carga dos dados no PostgreSQL                      |
-| PostgreSQL      | Destino centralizado dos dados                     |
-| SQL scripts     | Validação das tabelas carregadas e da auditoria    |
+| Componente | Papel |
+|---|---|
+| Docker | Constrói a imagem customizada do Airflow com Meltano e seus plugins |
+| Kind | Cria o cluster Kubernetes local |
+| Kubernetes | Orquestra os componentes da solução |
+| Apache Airflow 3.2.2 | Agenda, executa e monitora o pipeline |
+| Meltano 4.2.0 | Executa o processo ELT |
+| `tap-csv` | Extrai os sete arquivos CSV |
+| `target-postgres` | Carrega os registros no PostgreSQL analítico |
+| PostgreSQL do Airflow | Armazena metadados internos do Airflow |
+| PostgreSQL BanVic | Armazena os schemas `raw_banvic` e `control_banvic` |
+| Kubernetes Secrets | Mantêm credenciais e chaves fora do código versionado |
+| Scripts SQL | Validam contagens e eventos de auditoria |
 
----
+A solução utiliza dois bancos PostgreSQL independentes:
 
-## 3. Estrutura do Projeto
+1. **PostgreSQL interno do Helm Chart**, exclusivo para os metadados do Airflow.
+2. **Deployment `postgres`**, utilizado como destino analítico do BanVic.
+
+## 3. Versões fixadas
+
+| Componente | Versão |
+|---|---:|
+| Imagem customizada | `banvic-airflow-meltano:0.6.3` |
+| Apache Airflow | `3.2.2` |
+| Meltano | `4.2.0` |
+| Helm Chart do Airflow | `1.22.0` |
+| PostgreSQL analítico | `16` |
+| Kind node | `kindest/node:v1.35.0` |
+
+O pinning reduz variações entre instalações e torna a execução mais previsível.
+
+## 4. Estrutura do repositório
 
 ```text
 .
@@ -62,18 +76,27 @@ A arquitetura implementada está organizada em camadas, separando o fluxo princi
 │           ├── contas.csv
 │           ├── propostas_credito.csv
 │           └── transacoes.csv
+├── docs/
+│   └── images/
+│       └── banvic-data-architecture.png
 ├── infra/
 │   ├── airflow/
 │   │   └── Dockerfile
 │   └── k8s/
 │       ├── airflow-values.yaml
+│       ├── create-airflow-admin-secret.sh
+│       ├── create-airflow-api-secret.sh
+│       ├── create-postgres-secret.sh
 │       ├── namespace.yaml
 │       ├── postgres-deployment.yaml
 │       └── postgres-service.yaml
 ├── meltano_project/
 │   ├── meltano.yml
-│   ├── requirements.txt
 │   └── plugins/
+│       ├── extractors/
+│       │   └── tap-csv--meltanolabs.lock
+│       └── loaders/
+│           └── target-postgres--meltanolabs.lock
 ├── sql/
 │   ├── validate_audit_events.sql
 │   └── validate_raw_counts.sql
@@ -82,88 +105,75 @@ A arquitetura implementada está organizada em camadas, separando o fluxo princi
 └── README.md
 ```
 
----
+## 5. Fonte de dados
 
-## 4. Fonte de Dados
-
-A fonte de dados utilizada no pipeline é composta por 7 arquivos CSV representando as tabelas iniciais do BanVic:
-
-| Arquivo                   | Entidade                           |
-| ------------------------- | ---------------------------------- |
-| `agencias.csv`            | Agências                           |
-| `clientes.csv`            | Clientes                           |
-| `colaborador_agencia.csv` | Relacionamento colaborador-agência |
-| `colaboradores.csv`       | Colaboradores                      |
-| `contas.csv`              | Contas                             |
-| `propostas_credito.csv`   | Propostas de crédito               |
-| `transacoes.csv`          | Transações                         |
-
-Esses arquivos ficam disponíveis no diretório:
+Os arquivos de entrada ficam em:
 
 ```text
 data/input/banvic_raw/
 ```
 
-No container do Airflow, os arquivos são copiados para:
+Na imagem do Airflow, eles são copiados para:
 
 ```text
 /opt/airflow/data/input/banvic_raw/
 ```
 
----
+| Arquivo | Entidade | Registros esperados |
+|---|---|---:|
+| `agencias.csv` | Agências | 10 |
+| `clientes.csv` | Clientes | 998 |
+| `colaborador_agencia.csv` | Relação colaborador-agência | 100 |
+| `colaboradores.csv` | Colaboradores | 100 |
+| `contas.csv` | Contas | 999 |
+| `propostas_credito.csv` | Propostas de crédito | 2.000 |
+| `transacoes.csv` | Transações | 71.999 |
 
-## 5. Estratégia de Ingestão
+As contagens representam o snapshot fornecido para o desafio. Uma alteração legítima nos arquivos exige a atualização consciente dos valores esperados na DAG.
 
-A ingestão foi implementada com **Meltano**, utilizando:
+## 6. Estratégia de ingestão
 
-* `tap-csv` como extractor.
-* `target-postgres` como loader.
-
-O arquivo principal de configuração é:
+O pipeline Meltano está definido em:
 
 ```text
 meltano_project/meltano.yml
 ```
 
-O pipeline realiza a carga das 7 entidades para o schema:
+Plugins utilizados:
+
+- extractor: `tap-csv`;
+- loader: `target-postgres`.
+
+As sete entidades são carregadas no schema:
 
 ```text
 raw_banvic
 ```
 
-No PostgreSQL.
+A estratégia atual é **full refresh idempotente**:
 
-A estratégia adotada é de carga idempotente. Antes de cada execução, a DAG recria o schema `raw_banvic`, evitando duplicidade de registros e garantindo reprodutibilidade da carga.
+1. os arquivos fonte são validados;
+2. o schema `raw_banvic` é recriado;
+3. o Meltano executa a carga;
+4. as tabelas carregadas são validadas.
 
----
+Executar a DAG novamente produz o mesmo estado final, sem acumular duplicidades.
 
-## 6. Orquestração com Airflow
+## 7. Orquestração com Airflow
 
-A DAG principal está em:
+A DAG está em:
 
 ```text
 dags/banvic_meltano_ingestion_dag.py
 ```
 
-Nome da DAG:
+Identificador:
 
 ```text
 banvic_meltano_ingestion
 ```
 
-### Tasks da DAG
-
-A DAG possui as seguintes etapas:
-
-| Task                                     | Descrição                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------ |
-| `ensure_audit_table`                     | Cria/verifica a tabela de auditoria                                |
-| `validate_source_files`                  | Valida a disponibilidade dos arquivos de entrada                   |
-| `recreate_raw_schema`                    | Recria o schema `raw_banvic` para garantir idempotência            |
-| `run_meltano_tap_csv_to_target_postgres` | Executa o pipeline Meltano                                         |
-| `validate_loaded_tables`                 | Valida se as tabelas foram carregadas com as quantidades esperadas |
-
-### Dependência das tasks
+Fluxo:
 
 ```text
 ensure_audit_table
@@ -173,180 +183,247 @@ ensure_audit_table
     >> validate_loaded_tables
 ```
 
----
+| Task | Responsabilidade |
+|---|---|
+| `ensure_audit_table` | Cria ou valida a estrutura de auditoria |
+| `validate_source_files` | Valida existência, cabeçalho e contagem dos sete CSVs |
+| `recreate_raw_schema` | Recria `raw_banvic` para garantir idempotência |
+| `run_meltano_tap_csv_to_target_postgres` | Executa o pipeline Meltano |
+| `validate_loaded_tables` | Confirma as contagens das sete tabelas carregadas |
 
-## 7. Monitoramento, Auditoria e Tratamento de Falhas
+A DAG possui:
 
-A solução implementa auditoria em PostgreSQL por meio da tabela:
+```text
+retries = 2
+retry_delay = 1 minuto
+```
+
+A validação da fonte ocorre antes da exclusão do schema. Portanto, um arquivo ausente, vazio, truncado ou com contagem divergente interrompe a execução antes de alterar o destino.
+
+## 8. Monitoramento, auditoria e falhas
+
+A auditoria é persistida em:
 
 ```text
 control_banvic.ingestion_audit
 ```
 
-Essa tabela registra eventos da execução da DAG, incluindo:
+Campos registrados:
 
-* `dag_id`
-* `run_id`
-* `task_id`
-* `table_name`
-* `status`
-* `row_count`
-* `message`
-* `created_at`
+- `audit_id`;
+- `dag_id`;
+- `run_id`;
+- `task_id`;
+- `table_name`;
+- `status`;
+- `row_count`;
+- `message`;
+- `created_at`.
 
-Exemplos de status registrados:
+Eventos relevantes:
 
-| Status                           | Significado                            |
-| -------------------------------- | -------------------------------------- |
-| `success`                        | Etapa executada com sucesso            |
-| `source_file_validated`          | Arquivo de entrada validado            |
-| `source_file_validation_failed`  | Falha na validação de arquivo          |
-| `loaded_table_validated`         | Tabela carregada e validada            |
-| `loaded_table_validation_failed` | Falha na validação da tabela carregada |
+| Status | Significado |
+|---|---|
+| `success` | Etapa operacional concluída |
+| `source_file_validated` | Arquivo fonte validado com contagem correta |
+| `source_file_validation_failed` | Falha na validação do arquivo fonte |
+| `meltano_started` | Execução do Meltano iniciada |
+| `meltano_succeeded` | Execução do Meltano concluída |
+| `loaded_table_validated` | Tabela de destino validada |
+| `loaded_table_validation_failed` | Divergência ou falha na validação do destino |
 
-A DAG também possui configuração de retries:
+O operador do Meltano possui callbacks para início, retry, sucesso e falha. Em caso de erro, a auditoria registra o tipo do evento sem armazenar credenciais.
 
-```python
-"retries": 2
-```
-
-Dessa forma, em caso de falha transitória, o Airflow realiza novas tentativas antes de marcar a execução como falha.
-
----
-
-## 8. Segurança e Gerenciamento de Segredos
-
-As credenciais não são expostas diretamente no código da DAG.
-
-Para esta POC local, algumas credenciais de demonstração podem existir em arquivos de configuração do ambiente Kubernetes/Airflow. Em um ambiente produtivo, esses valores devem ser substituídos por mecanismos apropriados de gerenciamento de segredos, como Kubernetes Secrets, Vault, Secret Manager ou serviço equivalente.
-
-A configuração do `target-postgres` utiliza variáveis de ambiente no `meltano.yml`:
-
-```yaml
-host: ${TARGET_POSTGRES_HOST}
-port: ${TARGET_POSTGRES_PORT}
-database: ${TARGET_POSTGRES_DATABASE}
-user: ${TARGET_POSTGRES_USER}
-password: ${TARGET_POSTGRES_PASSWORD}
-```
-
-Arquivos locais de ambiente e estados internos de ferramenta são ignorados pelo Git:
+Uma execução bem-sucedida gera 18 eventos:
 
 ```text
-.env
-*.env
-meltano_project/.env
-meltano_project/.meltano/
-.venv/
+1  criação/validação da auditoria
+7  validações dos arquivos fonte
+1  recriação do schema
+2  eventos do Meltano
+7  validações das tabelas carregadas
 ```
 
----
+## 9. Segurança e gerenciamento de segredos
 
-## 9. Como Executar Localmente
+Nenhuma senha ou chave operacional deve ser versionada no Git.
 
-### 9.1 Pré-requisitos
+A solução utiliza quatro Kubernetes Secrets:
 
-É necessário ter instalado:
+| Secret | Consumidor | Conteúdo |
+|---|---|---|
+| `postgres-secret` | PostgreSQL BanVic | usuário, senha e banco |
+| `airflow-runtime-secret` | Airflow e Meltano | parâmetros de conexão e `AIRFLOW_CONN_BANVIC_DW` |
+| `airflow-admin-secret` | Job de criação do usuário | credenciais administrativas da interface |
+| `airflow-api-secret` | API do Airflow | chave interna estática da API |
 
-* Docker
-* Kind
-* kubectl
-* Helm
-* Python 3
-* Git
-* WSL ou ambiente Linux equivalente
+Os scripts:
 
----
+```text
+infra/k8s/create-postgres-secret.sh
+infra/k8s/create-airflow-admin-secret.sh
+infra/k8s/create-airflow-api-secret.sh
+```
 
-### 9.2 Criar o cluster Kind
+implementam os seguintes controles:
+
+- senhas digitadas sem exibição no terminal;
+- confirmação da senha administrativa;
+- geração criptograficamente segura da chave da API;
+- arquivos temporários criados com `umask 077`;
+- remoção automática dos temporários;
+- manifestos enviados diretamente ao Kubernetes;
+- ausência de arquivos YAML com credenciais no repositório;
+- preservação da chave da API para evitar rotação acidental.
+
+Não use `admin/admin`. As credenciais válidas são aquelas definidas durante a execução do script administrativo.
+
+Também não execute comandos que imprimam Fernet Key, API key, senhas ou conteúdo completo de Secrets no terminal.
+
+## 10. Execução local a partir de um ambiente limpo
+
+Os comandos abaixo devem ser executados na raiz do repositório, em WSL ou Linux.
+
+### 10.1 Pré-requisitos
+
+- Docker;
+- Kind;
+- `kubectl`;
+- Helm;
+- Python 3;
+- Git.
+
+### 10.2 Criar o cluster Kind
 
 ```bash
-kind create cluster --name banvic
+kind create cluster \
+  --name banvic \
+  --image kindest/node:v1.35.0
 ```
 
-Validar o cluster:
+Validar:
 
 ```bash
 kubectl cluster-info --context kind-banvic
+kubectl config use-context kind-banvic
 ```
 
----
-
-### 9.3 Criar o namespace
+### 10.3 Criar o namespace
 
 ```bash
 kubectl apply -f infra/k8s/namespace.yaml
 ```
 
----
+### 10.4 Criar os Secrets do PostgreSQL
 
-### 9.4 Subir o PostgreSQL
+```bash
+bash infra/k8s/create-postgres-secret.sh
+```
+
+O script solicita a senha local e cria:
+
+```text
+postgres-secret
+airflow-runtime-secret
+```
+
+### 10.5 Subir o PostgreSQL analítico
 
 ```bash
 kubectl apply -f infra/k8s/postgres-deployment.yaml
 kubectl apply -f infra/k8s/postgres-service.yaml
 ```
 
-Validar os pods:
+Aguardar disponibilidade:
 
 ```bash
-kubectl get pods -n banvic
+kubectl rollout status \
+  deployment/postgres \
+  --namespace banvic \
+  --timeout 5m
 ```
 
----
+### 10.6 Criar os Secrets do Airflow
 
-### 9.5 Construir a imagem customizada do Airflow
+Criar as credenciais administrativas:
 
 ```bash
-docker build -t banvic-airflow-meltano:0.4.0 -f infra/airflow/Dockerfile .
+bash infra/k8s/create-airflow-admin-secret.sh
 ```
 
-Carregar a imagem no cluster Kind:
+Criar a chave interna estática da API:
 
 ```bash
-kind load docker-image banvic-airflow-meltano:0.4.0 --name banvic
+bash infra/k8s/create-airflow-api-secret.sh
 ```
 
----
+Por padrão, o script da API preserva uma chave já existente. Uma rotação consciente pode ser feita com:
 
-### 9.6 Instalar o Airflow via Helm
+```bash
+ROTATE_API_SECRET=true \
+bash infra/k8s/create-airflow-api-secret.sh
+```
 
-Adicionar o repositório Helm do Airflow:
+A rotação invalida tokens existentes e pode provocar reinícios dos componentes.
+
+### 10.7 Construir a imagem customizada
+
+```bash
+docker build \
+  --tag banvic-airflow-meltano:0.6.3 \
+  --file infra/airflow/Dockerfile \
+  .
+```
+
+### 10.8 Carregar a imagem no Kind
+
+```bash
+kind load docker-image \
+  banvic-airflow-meltano:0.6.3 \
+  --name banvic
+```
+
+### 10.9 Instalar o Airflow
 
 ```bash
 helm repo add apache-airflow https://airflow.apache.org
 helm repo update
 ```
 
-Instalar ou atualizar o Airflow:
-
 ```bash
 helm upgrade --install airflow apache-airflow/airflow \
+  --version 1.22.0 \
   --namespace banvic \
-  -f infra/k8s/airflow-values.yaml
+  --values infra/k8s/airflow-values.yaml \
+  --atomic \
+  --timeout 15m
 ```
 
-Validar os pods:
+Validar:
 
 ```bash
 kubectl get pods -n banvic
 ```
 
----
+Os componentes ativos do Airflow devem ficar em `Running`, e os Jobs de migration e criação de usuário devem terminar em `Succeeded`.
 
-### 9.7 Validar importação da DAG
-
-Obter o pod do scheduler:
+### 10.10 Validar a DAG
 
 ```bash
-SCHEDULER_POD=$(kubectl get pods -n banvic -l component=scheduler -o jsonpath='{.items[0].metadata.name}')
-echo $SCHEDULER_POD
+SCHEDULER_POD="$(
+  kubectl get pods -n banvic \
+    -l component=scheduler \
+    -o jsonpath='{.items[0].metadata.name}'
+)"
 ```
 
 Validar erros de importação:
 
 ```bash
-kubectl exec -n banvic -c scheduler $SCHEDULER_POD -- airflow dags list-import-errors
+kubectl exec -n banvic \
+  -c scheduler \
+  "${SCHEDULER_POD}" -- \
+  airflow dags list-import-errors
 ```
 
 Resultado esperado:
@@ -355,24 +432,38 @@ Resultado esperado:
 No data found
 ```
 
-Listar a DAG:
+Confirmar a DAG:
 
 ```bash
-kubectl exec -n banvic -c scheduler $SCHEDULER_POD -- airflow dags list | grep banvic_meltano_ingestion
+kubectl exec -n banvic \
+  -c scheduler \
+  "${SCHEDULER_POD}" -- \
+  airflow dags list |
+grep banvic_meltano_ingestion
 ```
 
----
+A coluna `is_paused` deve aparecer como `False`. A DAG utiliza
+`is_paused_upon_creation=False`, portanto não é necessário executar
+`airflow dags unpause` após uma instalação limpa.
 
-### 9.8 Executar a DAG
+### 10.11 Executar a DAG
 
 ```bash
-kubectl exec -n banvic -c scheduler $SCHEDULER_POD -- airflow dags trigger banvic_meltano_ingestion
+kubectl exec -n banvic \
+  -c scheduler \
+  "${SCHEDULER_POD}" -- \
+  airflow dags trigger banvic_meltano_ingestion
 ```
+
+Anote o `run_id` retornado.
 
 Consultar execuções:
 
 ```bash
-kubectl exec -n banvic -c scheduler $SCHEDULER_POD -- airflow dags list-runs banvic_meltano_ingestion
+kubectl exec -n banvic \
+  -c scheduler \
+  "${SCHEDULER_POD}" -- \
+  airflow dags list-runs banvic_meltano_ingestion
 ```
 
 Resultado esperado para a execução mais recente:
@@ -381,159 +472,176 @@ Resultado esperado para a execução mais recente:
 state = success
 ```
 
----
+## 11. Validação dos dados carregados
 
-## 10. Validação dos Dados Carregados
-
-A validação das contagens finais pode ser executada com:
+Executar a consulta sem imprimir a senha:
 
 ```bash
-kubectl exec -i -n banvic deployment/postgres -- psql -U banvic_user -d banvic_dw < sql/validate_raw_counts.sql
+kubectl exec -i -n banvic deployment/postgres -- sh -lc '
+  export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+  psql \
+    --username "${POSTGRES_USER}" \
+    --dbname "${POSTGRES_DB}" \
+    --set ON_ERROR_STOP=1 \
+    --pset pager=off
+' < sql/validate_raw_counts.sql
 ```
 
 Resultado esperado:
 
-```text
-       tabela        | registros 
----------------------+-----------
- agencias            |        10
- clientes            |       998
- colaborador_agencia |       100
- colaboradores       |       100
- contas              |       999
- propostas_credito   |      2000
- transacoes          |     71999
-```
+| Tabela | Registros |
+|---|---:|
+| `agencias` | 10 |
+| `clientes` | 998 |
+| `colaborador_agencia` | 100 |
+| `colaboradores` | 100 |
+| `contas` | 999 |
+| `propostas_credito` | 2.000 |
+| `transacoes` | 71.999 |
 
----
-
-## 11. Validação da Auditoria
-
-A consulta dos eventos de auditoria pode ser feita com:
+## 12. Validação da auditoria
 
 ```bash
-kubectl exec -i -n banvic deployment/postgres -- psql -U banvic_user -d banvic_dw < sql/validate_audit_events.sql
+kubectl exec -i -n banvic deployment/postgres -- sh -lc '
+  export PGPASSWORD="${POSTGRES_PASSWORD}"
+
+  psql \
+    --username "${POSTGRES_USER}" \
+    --dbname "${POSTGRES_DB}" \
+    --set ON_ERROR_STOP=1 \
+    --pset pager=off
+' < sql/validate_audit_events.sql
 ```
 
-Essa consulta retorna os eventos mais recentes registrados na tabela:
+A consulta deve retornar eventos recentes de:
 
-```text
-control_banvic.ingestion_audit
-```
+- criação ou validação da tabela de auditoria;
+- validação quantitativa dos arquivos fonte;
+- recriação do schema;
+- início e término do Meltano;
+- validação das tabelas carregadas.
 
-A execução bem-sucedida registra eventos de:
-
-* validação da tabela de auditoria;
-* validação dos arquivos fonte;
-* recriação do schema raw;
-* validação das tabelas carregadas.
-
----
-
-## 12. Acesso à Interface do Airflow
-
-Para acessar a interface do Airflow localmente:
+## 13. Acesso à interface do Airflow
 
 ```bash
-kubectl port-forward svc/airflow-api-server 8080:8080 --namespace banvic
+kubectl port-forward \
+  service/airflow-api-server \
+  8080:8080 \
+  --namespace banvic
 ```
 
-Depois, acessar no navegador:
+Acessar:
 
 ```text
 http://localhost:8080
 ```
 
-Na interface, é possível acompanhar a DAG:
+Utilize o usuário e a senha definidos por:
 
 ```text
-banvic_meltano_ingestion
+infra/k8s/create-airflow-admin-secret.sh
 ```
 
-E verificar visualmente:
+A interface permite acompanhar:
 
-* status da execução;
-* dependências entre tasks;
-* retries;
-* logs;
-* tempo de execução;
-* histórico de runs.
+- status das execuções;
+- dependência entre tasks;
+- tentativas e retries;
+- logs de cada task;
+- duração;
+- histórico de runs;
+- falhas operacionais.
 
----
+## 14. Evidências de funcionamento
 
-## 13. Evidências de Funcionamento
+A versão `0.6.3` foi validada em 20 de julho de 2026 com:
 
-A solução foi validada considerando:
+- Helm revision `2`;
+- Airflow `3.2.2`;
+- Meltano `4.2.0`;
+- Chart `1.22.0`;
+- imagem `banvic-airflow-meltano:0.6.3`;
+- cinco tasks concluídas com `success`;
+- sete CSVs validados antes da carga;
+- sete tabelas validadas após a carga;
+- 18 eventos de auditoria;
+- `meltano_started` e `meltano_succeeded`;
+- contagens de origem e destino idênticas;
+- componentes do Airflow iniciados sem reinícios no rollout da revisão;
+- Secrets separados por responsabilidade;
+- chave estática da API do Airflow;
+- execução idempotente confirmada.
 
-* criação e execução do ambiente Kubernetes local;
-* build da imagem customizada do Airflow;
-* execução da DAG no Airflow;
-* validação da importação da DAG sem erros;
-* execução do Meltano pelo Airflow;
-* carga das 7 tabelas no PostgreSQL;
-* validação das contagens finais;
-* registro dos eventos na tabela de auditoria;
-* configuração de retries;
-* execução idempotente por recriação do schema `raw_banvic`.
+Execução de referência:
 
----
+```text
+manual__2026-07-20T16:37:15.728040+00:00
+```
 
-## 14. Decisões Técnicas
+Estado final:
 
-### Uso de PostgreSQL
+```text
+success
+```
 
-O PostgreSQL foi escolhido como destino por representar um Data Warehouse local simples, adequado para uma POC de centralização de dados.
+## 15. Decisões técnicas
 
-### Uso de Meltano
+### PostgreSQL
 
-O Meltano foi escolhido para separar claramente o processo de extração e carga da orquestração. A configuração declarativa em `meltano.yml` facilita manutenção e evolução do pipeline.
+Foi escolhido como destino por ser adequado a uma POC local de centralização de dados e por possuir integração direta com o Airflow e o Meltano.
 
-### Uso de Airflow
+### Meltano
 
-O Airflow foi utilizado para orquestrar o processo, definir dependências, controlar retries e permitir monitoramento visual da execução.
+Separa a lógica de extração e carga da orquestração. Os lockfiles dos plugins reduzem variações de instalação.
 
-### Uso de Kubernetes local com Kind
+### Airflow
 
-O Kind foi utilizado para simular um ambiente conteinerizado e reprodutível, atendendo ao requisito de execução local com Kubernetes.
+Orquestra dependências, retries, callbacks, auditoria e monitoramento visual.
 
-### Estratégia de idempotência
+### Kind
 
-A DAG recria o schema `raw_banvic` antes da carga. Com isso, múltiplas execuções do pipeline produzem o mesmo resultado final, sem duplicidade de registros.
+Permite executar Kubernetes localmente sem depender de infraestrutura em nuvem.
 
-### Estratégia de auditoria
+### LocalExecutor
 
-A tabela `control_banvic.ingestion_audit` permite rastrear a execução do pipeline por DAG run, task, tabela e status, apoiando monitoramento e troubleshooting.
+É suficiente para a escala da POC e evita a complexidade operacional de Celery e Redis.
 
----
+### Full refresh idempotente
 
-## 15. Repositório
+A recriação do schema simplifica a reprodutibilidade do snapshot e elimina duplicidades entre execuções.
 
-Repositório do projeto:
+### Auditoria no destino
+
+A tabela `control_banvic.ingestion_audit` fornece rastreabilidade independente da interface do Airflow.
+
+### Segregação de Secrets
+
+Cada componente recebe somente as credenciais necessárias à sua função, reduzindo exposição e acoplamento.
+
+## 16. Limitações conhecidas
+
+Esta solução é uma POC local. Portanto:
+
+- não implementa carga incremental ou CDC;
+- não possui alta disponibilidade;
+- não utiliza um gerenciador externo de segredos;
+- os logs do Airflow não estão configurados com persistência externa;
+- os dados fonte são incorporados à imagem durante o build;
+- mudanças legítimas no snapshot exigem atualização das contagens esperadas;
+- a exclusão do cluster Kind remove os recursos locais e exige novo provisionamento;
+- o ambiente depende dos recursos disponíveis no Docker Desktop e no WSL.
+
+Em produção, a evolução natural incluiria armazenamento de objetos, observabilidade centralizada, logs persistentes, secret manager, CI/CD, políticas de rede, backup e estratégia incremental.
+
+## 17. Repositório
 
 ```text
 https://github.com/fabio-baptista/certificacao-data-engineer
 ```
 
----
+## 18. Conclusão
 
-## 16. Roteiro Sugerido para o Vídeo
+A solução entrega uma POC funcional e auditável de engenharia de dados para o BanVic, cobrindo infraestrutura local com Kubernetes, orquestração com Airflow, ingestão com Meltano, armazenamento em PostgreSQL, segurança por Secrets, validação de origem e destino, idempotência e monitoramento operacional.
 
-Para a apresentação final de 3 a 5 minutos, recomenda-se seguir este roteiro:
-
-1. Apresentar rapidamente o objetivo do desafio.
-2. Mostrar a arquitetura no README.
-3. Mostrar a estrutura de pastas do projeto.
-4. Explicar a DAG `banvic_meltano_ingestion`.
-5. Mostrar o ambiente Kubernetes com `kubectl get pods -n banvic`.
-6. Abrir a interface do Airflow e mostrar a DAG executada com sucesso.
-7. Executar ou mostrar a validação das contagens em `raw_banvic`.
-8. Mostrar a tabela de auditoria com os eventos da execução.
-9. Finalizar explicando idempotência, retries e segurança de credenciais.
-
----
-
-## 17. Conclusão
-
-A solução entrega uma POC funcional de engenharia de dados para o BanVic, cobrindo infraestrutura local com Kubernetes, orquestração com Airflow, ingestão com Meltano, armazenamento em PostgreSQL, validação de dados e auditoria operacional.
-
-O pipeline implementado permite centralizar as tabelas iniciais do BanVic em um ambiente estruturado, reprodutível e monitorável, servindo como base para futuras camadas analíticas e consumo por ferramentas de BI.
+O pipeline centraliza as sete entidades do desafio em um ambiente reproduzível e constitui uma base consistente para futuras camadas analíticas e consumo por ferramentas de BI.

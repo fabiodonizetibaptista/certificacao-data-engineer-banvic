@@ -20,7 +20,38 @@ if ! kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1; then
     exit 1
 fi
 
-# A senha é solicitada sem ser exibida no terminal.
+# Como o banco utiliza armazenamento persistente, a senha armazenada
+# internamente pelo PostgreSQL não é alterada apenas pela atualização de um
+# Kubernetes Secret. Para evitar divergência de credenciais, este script cria
+# os Secrets somente na instalação inicial e preserva os existentes.
+POSTGRES_SECRET_EXISTS=false
+AIRFLOW_RUNTIME_SECRET_EXISTS=false
+
+if kubectl get secret "${POSTGRES_SECRET_NAME}" \
+    --namespace "${NAMESPACE}" >/dev/null 2>&1; then
+    POSTGRES_SECRET_EXISTS=true
+fi
+
+if kubectl get secret "${AIRFLOW_RUNTIME_SECRET_NAME}" \
+    --namespace "${NAMESPACE}" >/dev/null 2>&1; then
+    AIRFLOW_RUNTIME_SECRET_EXISTS=true
+fi
+
+if [[ "${POSTGRES_SECRET_EXISTS}" == "true" && "${AIRFLOW_RUNTIME_SECRET_EXISTS}" == "true" ]]; then
+    echo "Os Secrets do PostgreSQL já existem no namespace '${NAMESPACE}'."
+    echo "Nenhuma credencial foi alterada."
+    echo "A rotação de senha exige atualização coordenada do PostgreSQL e dos consumidores."
+    exit 0
+fi
+
+if [[ "${POSTGRES_SECRET_EXISTS}" != "${AIRFLOW_RUNTIME_SECRET_EXISTS}" ]]; then
+    echo "Erro: estado inconsistente dos Secrets do PostgreSQL." >&2
+    echo "Os Secrets '${POSTGRES_SECRET_NAME}' e '${AIRFLOW_RUNTIME_SECRET_NAME}' devem existir juntos." >&2
+    echo "Nenhuma credencial foi criada ou alterada." >&2
+    exit 1
+fi
+
+# A senha é solicitada sem ser exibida no terminal somente na instalação inicial.
 if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
     read -r -s -p "Informe a senha local do PostgreSQL: " POSTGRES_PASSWORD
     echo
@@ -94,15 +125,15 @@ kubectl create secret generic "${POSTGRES_SECRET_NAME}" \
     --from-env-file="${POSTGRES_ENV_FILE}" \
     --dry-run=client \
     --output=yaml |
-kubectl apply -f -
+kubectl create -f -
 
 kubectl create secret generic "${AIRFLOW_RUNTIME_SECRET_NAME}" \
     --namespace "${NAMESPACE}" \
     --from-env-file="${AIRFLOW_RUNTIME_ENV_FILE}" \
     --dry-run=client \
     --output=yaml |
-kubectl apply -f -
+kubectl create -f -
 
-echo "Secret '${POSTGRES_SECRET_NAME}' criado ou atualizado no namespace '${NAMESPACE}'."
-echo "Secret '${AIRFLOW_RUNTIME_SECRET_NAME}' criado ou atualizado no namespace '${NAMESPACE}'."
+echo "Secret '${POSTGRES_SECRET_NAME}' criado no namespace '${NAMESPACE}'."
+echo "Secret '${AIRFLOW_RUNTIME_SECRET_NAME}' criado no namespace '${NAMESPACE}'."
 echo "Nenhuma credencial foi gravada no repositório."

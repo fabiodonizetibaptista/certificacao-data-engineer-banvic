@@ -47,11 +47,16 @@ A solução utiliza dois bancos PostgreSQL independentes:
 1. **PostgreSQL interno do Helm Chart**, exclusivo para os metadados do Airflow.
 2. **Deployment `postgres`**, utilizado como destino analítico do BanVic.
 
+O PostgreSQL analítico utiliza o PVC `postgres-data`, com `2Gi` e acesso
+`ReadWriteOnce`. O volume preserva os dados durante recriações e atualizações
+do Pod. O PostgreSQL interno do Airflow mantém seu próprio PVC, independente
+do banco analítico.
+
 ## 3. Versões fixadas
 
 | Componente | Versão |
 |---|---:|
-| Imagem customizada | `banvic-airflow-meltano:0.6.3` |
+| Imagem customizada | `banvic-airflow-meltano:0.6.4` |
 | Apache Airflow | `3.2.2` |
 | Meltano | `4.2.0` |
 | Helm Chart do Airflow | `1.22.0` |
@@ -89,6 +94,7 @@ O pinning reduz variações entre instalações e torna a execução mais previs
 │       ├── create-postgres-secret.sh
 │       ├── namespace.yaml
 │       ├── postgres-deployment.yaml
+│       ├── postgres-pvc.yaml
 │       └── postgres-service.yaml
 ├── meltano_project/
 │   ├── meltano.yml
@@ -129,7 +135,11 @@ Na imagem do Airflow, eles são copiados para:
 | `propostas_credito.csv` | Propostas de crédito | 2.000 |
 | `transacoes.csv` | Transações | 71.999 |
 
-As contagens representam o snapshot fornecido para o desafio. Uma alteração legítima nos arquivos exige a atualização consciente dos valores esperados na DAG.
+As contagens representam o snapshot fornecido para o desafio e são usadas
+como evidência de aceitação. A DAG não depende desses números fixos: ela calcula
+as quantidades diretamente dos CSVs e valida a paridade entre origem e destino.
+
+O conjunto é tratado nesta solução como material educacional e demonstrativo da POC. Em um ambiente real, a camada RAW deveria possuir acesso restrito, e as camadas de consumo deveriam aplicar classificação, mascaramento ou pseudonimização conforme a sensibilidade dos dados e as políticas de privacidade aplicáveis.
 
 ## 6. Estratégia de ingestão
 
@@ -141,8 +151,14 @@ meltano_project/meltano.yml
 
 Plugins utilizados:
 
-- extractor: `tap-csv`;
-- loader: `target-postgres`.
+- extractor `tap-csv` `1.2.0`, fixado no commit
+  `7af22d8e81ff2ac6bd391aec63fd1fef4eb24b22`;
+- loader `meltanolabs-target-postgres` `0.8.0`.
+
+O `meltano.yml` fixa os artefatos efetivamente instalados. Os lockfiles
+preservam as definições dos plugins obtidas do Meltano Hub, e o Dockerfile
+interrompe o build caso a versão ou o commit instalado seja diferente do
+contrato validado.
 
 As sete entidades são carregadas no schema:
 
@@ -186,10 +202,10 @@ ensure_audit_table
 | Task | Responsabilidade |
 |---|---|
 | `ensure_audit_table` | Cria ou valida a estrutura de auditoria |
-| `validate_source_files` | Valida existência, cabeçalho e contagem dos sete CSVs |
+| `validate_source_files` | Valida existência, conteúdo, cabeçalho, estrutura, chaves obrigatórias e duplicidades dos sete CSVs |
 | `recreate_raw_schema` | Recria `raw_banvic` para garantir idempotência |
 | `run_meltano_tap_csv_to_target_postgres` | Executa o pipeline Meltano |
-| `validate_loaded_tables` | Confirma as contagens das sete tabelas carregadas |
+| `validate_loaded_tables` | Confirma a paridade de contagens, chaves obrigatórias e ausência de duplicidades no destino |
 
 A DAG possui:
 
@@ -198,7 +214,10 @@ retries = 2
 retry_delay = 1 minuto
 ```
 
-A validação da fonte ocorre antes da exclusão do schema. Portanto, um arquivo ausente, vazio, truncado ou com contagem divergente interrompe a execução antes de alterar o destino.
+A validação da fonte ocorre antes da exclusão do schema. Portanto, um arquivo
+ausente, vazio, estruturalmente inválido, com chave obrigatória ausente ou com
+duplicidade de chave interrompe a execução antes de alterar o destino. Depois da
+carga, a DAG compara as quantidades reais da origem com as tabelas carregadas.
 
 ## 8. Monitoramento, auditoria e falhas
 
@@ -207,6 +226,8 @@ A auditoria é persistida em:
 ```text
 control_banvic.ingestion_audit
 ```
+
+Os logs locais dos Pods do Airflow utilizam `emptyDir` e são efêmeros. Essa decisão evita um PVC de logs de `100Gi` desnecessário para a POC. A rastreabilidade operacional relevante permanece persistida no PostgreSQL por meio da tabela de auditoria.
 
 Campos registrados:
 
@@ -274,7 +295,10 @@ implementam os seguintes controles:
 - remoção automática dos temporários;
 - manifestos enviados diretamente ao Kubernetes;
 - ausência de arquivos YAML com credenciais no repositório;
-- preservação da chave da API para evitar rotação acidental.
+- preservação da chave da API para evitar rotação acidental;
+- preservação dos Secrets do PostgreSQL quando ambos já existem;
+- bloqueio da execução quando apenas um dos Secrets do PostgreSQL existe;
+- prevenção de sobrescrita acidental das credenciais do banco persistente.
 
 Não use `admin/admin`. As credenciais válidas são aquelas definidas durante a execução do script administrativo.
 
@@ -320,19 +344,26 @@ kubectl apply -f infra/k8s/namespace.yaml
 bash infra/k8s/create-postgres-secret.sh
 ```
 
-O script solicita a senha local e cria:
+Na instalação inicial, o script solicita a senha local e cria:
 
 ```text
 postgres-secret
 airflow-runtime-secret
 ```
 
+Os dois Secrets são tratados como um par. Quando ambos já existem, o script preserva as credenciais e termina sem alterações. Se apenas um deles existir, a execução é interrompida para impedir um estado inconsistente.
+
+Como o PostgreSQL utiliza armazenamento persistente, a rotação de senha deve ser coordenada entre o usuário interno do banco, `postgres-secret`, `airflow-runtime-secret` e os Pods consumidores. Alterar apenas um Secret não modifica automaticamente a senha já gravada no PostgreSQL.
+
 ### 10.5 Subir o PostgreSQL analítico
 
 ```bash
+kubectl apply -f infra/k8s/postgres-pvc.yaml
 kubectl apply -f infra/k8s/postgres-deployment.yaml
 kubectl apply -f infra/k8s/postgres-service.yaml
 ```
+
+O PVC deve ser criado antes do Deployment. O volume `postgres-data` preserva os schemas `raw_banvic` e `control_banvic` durante recriações e atualizações do Pod.
 
 Aguardar disponibilidade:
 
@@ -370,7 +401,7 @@ A rotação invalida tokens existentes e pode provocar reinícios dos componente
 
 ```bash
 docker build \
-  --tag banvic-airflow-meltano:0.6.3 \
+  --tag banvic-airflow-meltano:0.6.4 \
   --file infra/airflow/Dockerfile \
   .
 ```
@@ -379,7 +410,7 @@ docker build \
 
 ```bash
 kind load docker-image \
-  banvic-airflow-meltano:0.6.3 \
+  banvic-airflow-meltano:0.6.4 \
   --name banvic
 ```
 
@@ -555,28 +586,35 @@ A interface permite acompanhar:
 
 ## 14. Evidências de funcionamento
 
-A versão `0.6.3` foi validada em 20 de julho de 2026 com:
+A versão `0.6.4` foi validada em 21 de julho de 2026 com:
 
-- Helm revision `2`;
+- Helm revision `3`;
 - Airflow `3.2.2`;
 - Meltano `4.2.0`;
 - Chart `1.22.0`;
-- imagem `banvic-airflow-meltano:0.6.3`;
+- imagem `banvic-airflow-meltano:0.6.4`;
+- `tap-csv` `1.2.0` fixado no commit `7af22d8e81ff2ac6bd391aec63fd1fef4eb24b22`;
+- `meltanolabs-target-postgres` `0.8.0`;
 - cinco tasks concluídas com `success`;
 - sete CSVs validados antes da carga;
 - sete tabelas validadas após a carga;
 - 18 eventos de auditoria;
 - `meltano_started` e `meltano_succeeded`;
 - contagens de origem e destino idênticas;
-- componentes do Airflow iniciados sem reinícios no rollout da revisão;
+- scheduler executado como `Deployment`, com logs locais em `emptyDir`;
+- PVC de logs de `100Gi` eliminado;
+- componentes do Airflow iniciados sem reinícios no rollout;
 - Secrets separados por responsabilidade;
 - chave estática da API do Airflow;
-- execução idempotente confirmada.
+- execução idempotente confirmada;
+- persistência do PostgreSQL validada após exclusão e recriação do Pod;
+- PVC analítico `postgres-data` mantido em estado `Bound`;
+- criação e preservação dos Secrets testadas nos cenários inicial, idempotente e inconsistente.
 
 Execução de referência:
 
 ```text
-manual__2026-07-20T16:37:15.728040+00:00
+manual__validation_0_6_4_20260721T020827Z
 ```
 
 Estado final:
@@ -587,37 +625,45 @@ success
 
 ## 15. Decisões técnicas
 
-### PostgreSQL
+### PostgreSQL e persistência
 
-Foi escolhido como destino por ser adequado a uma POC local de centralização de dados e por possuir integração direta com o Airflow e o Meltano.
+O PostgreSQL foi escolhido como destino por ser adequado à escala da POC e possuir integração direta com Airflow e Meltano. O banco analítico utiliza o PVC `postgres-data`, permitindo que os dados sobrevivam à exclusão e recriação do Pod. O `local-path` do Kind protege contra reinícios do workload, mas não contra a exclusão completa do cluster.
 
-### Meltano
+### Meltano e reprodutibilidade
 
-Separa a lógica de extração e carga da orquestração. Os lockfiles dos plugins reduzem variações de instalação.
+O Meltano separa a extração e a carga da orquestração. O `tap-csv` está fixado por commit Git e o `target-postgres` por versão publicada. O Dockerfile valida esses artefatos durante o build e interrompe a criação da imagem em caso de divergência.
 
-### Airflow
+### Airflow e auditoria
 
-Orquestra dependências, retries, callbacks, auditoria e monitoramento visual.
+O Airflow orquestra dependências, retries, callbacks e validações. Os logs dos Pods utilizam `emptyDir`, evitando um PVC local de `100Gi` desnecessário. Os eventos operacionais relevantes permanecem persistidos em `control_banvic.ingestion_audit`.
 
 ### Kind
 
-Permite executar Kubernetes localmente sem depender de infraestrutura em nuvem.
+O Kind permite reproduzir localmente a implantação em Kubernetes sem depender de infraestrutura em nuvem. Ele é adequado para desenvolvimento, demonstração e avaliação técnica, mas não oferece a durabilidade ou a alta disponibilidade esperadas em produção.
 
 ### LocalExecutor
 
-É suficiente para a escala da POC e evita a complexidade operacional de Celery e Redis.
+O `LocalExecutor` é suficiente para a escala da POC e evita a complexidade operacional de Celery e Redis. Como o scheduler também executa as tasks nesse modo, a persistência dos workers foi explicitamente desabilitada no Helm Chart.
 
 ### Full refresh idempotente
 
-A recriação do schema simplifica a reprodutibilidade do snapshot e elimina duplicidades entre execuções.
+A recriação do schema `raw_banvic` simplifica a reprodução do snapshot e impede acúmulo de duplicidades entre execuções. Em produção, uma evolução mais segura seria carregar em schema ou tabelas de staging, validar o resultado e promover a nova versão por troca controlada.
 
-### Auditoria no destino
+### Fonte incorporada à imagem
 
-A tabela `control_banvic.ingestion_audit` fornece rastreabilidade independente da interface do Airflow.
+Os CSVs são copiados para a imagem porque o desafio utiliza um snapshot conhecido e disponível antes da execução. Por isso, não foi necessário implementar `FileSensor`. Em produção, a fonte deveria ser externalizada para object storage, SFTP ou volume compartilhado, com sensor, evento ou mecanismo equivalente quando a chegada fosse assíncrona.
+
+### Tipagem da camada RAW
+
+A camada RAW preserva os valores da fonte majoritariamente como texto, evitando conversões indevidas de identificadores, documentos, contas e códigos. Uma camada refinada de produção deveria aplicar contratos, tipos de negócio, regras de qualidade e proteção de dados para consumo analítico.
 
 ### Segregação de Secrets
 
-Cada componente recebe somente as credenciais necessárias à sua função, reduzindo exposição e acoplamento.
+Cada componente recebe apenas as credenciais necessárias à sua função. Os Secrets do PostgreSQL são tratados como um par e não podem ser sobrescritos acidentalmente depois que o banco persistente foi inicializado.
+
+### Escopo analítico
+
+Não foram adicionados dbt, modelo dimensional ou dashboard porque o desafio concentra-se em ingestão, orquestração, armazenamento, segurança, idempotência e monitoramento. Esses componentes são evoluções possíveis, não dependências para demonstrar o objetivo da POC.
 
 ## 16. Limitações conhecidas
 
@@ -628,7 +674,8 @@ Esta solução é uma POC local. Portanto:
 - não utiliza um gerenciador externo de segredos;
 - os logs do Airflow não estão configurados com persistência externa;
 - os dados fonte são incorporados à imagem durante o build;
-- mudanças legítimas no snapshot exigem atualização das contagens esperadas;
+- as contagens fixas dos scripts SQL representam apenas o snapshot de aceitação do desafio;
+- o PVC `local-path` preserva dados na recriação do Pod, mas não após a exclusão do cluster Kind;
 - a exclusão do cluster Kind remove os recursos locais e exige novo provisionamento;
 - o ambiente depende dos recursos disponíveis no Docker Desktop e no WSL.
 

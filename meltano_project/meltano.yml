@@ -10,7 +10,7 @@ plugins:
   extractors:
   - name: tap-csv
     variant: meltanolabs
-    pip_url: git+https://github.com/MeltanoLabs/tap-csv.git
+    pip_url: git+https://github.com/MeltanoLabs/tap-csv.git@7af22d8e81ff2ac6bd391aec63fd1fef4eb24b22
     config:
       files:
       - entity: agencias
@@ -59,7 +59,7 @@ plugins:
   loaders:
   - name: target-postgres
     variant: meltanolabs
-    pip_url: meltanolabs-target-postgres
+    pip_url: meltanolabs-target-postgres==0.8.0
     config:
       host: ${TARGET_POSTGRES_HOST}
       port: ${TARGET_POSTGRES_PORT}

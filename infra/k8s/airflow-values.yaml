@@ -11,7 +11,7 @@ apiSecretKeySecretName: airflow-api-secret
 images:
   airflow:
     repository: banvic-airflow-meltano
-    tag: 0.6.3
+    tag: 0.6.4
     pullPolicy: Never
 
 postgresql:
@@ -19,6 +19,16 @@ postgresql:
 
 redis:
   enabled: false
+
+# No LocalExecutor, o scheduler também executa as tasks.
+# A persistência dos workers precisa ser desabilitada explicitamente;
+# caso contrário, o Chart cria um StatefulSet e um PVC de logs de 100Gi.
+# Nesta POC local, os logs dos Pods são efêmeros e a auditoria operacional
+# permanece persistida no PostgreSQL.
+workers:
+  celery:
+    persistence:
+      enabled: false
 
 dags:
   persistence:

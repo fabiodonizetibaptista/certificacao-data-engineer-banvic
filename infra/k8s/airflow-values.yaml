@@ -1,0 +1,205 @@
+executor: LocalExecutor
+
+# Evita a injeção automática de variáveis de serviços Kubernetes nos Pods.
+# A solução utiliza DNS interno explícito para acessar seus serviços.
+enableServiceLinks: false
+
+# Mantém estável a chave utilizada internamente pela API do Airflow.
+# O Secret é criado localmente por create-airflow-api-secret.sh.
+apiSecretKeySecretName: airflow-api-secret
+
+images:
+  airflow:
+    repository: banvic-airflow-meltano
+    tag: 0.6.4
+    pullPolicy: Never
+
+postgresql:
+  enabled: true
+
+redis:
+  enabled: false
+
+# No LocalExecutor, o scheduler também executa as tasks.
+# A persistência dos workers precisa ser desabilitada explicitamente;
+# caso contrário, o Chart cria um StatefulSet e um PVC de logs de 100Gi.
+# Nesta POC local, os logs dos Pods são efêmeros e a auditoria operacional
+# permanece persistida no PostgreSQL.
+workers:
+  celery:
+    persistence:
+      enabled: false
+
+dags:
+  persistence:
+    enabled: false
+  gitSync:
+    enabled: false
+    recommendedProbeSetting: true
+
+logs:
+  persistence:
+    enabled: false
+
+triggerer:
+  persistence:
+    enabled: false
+
+# Injeta no Airflow apenas as configurações necessárias para:
+# 1. o Meltano carregar os dados por meio do target-postgres;
+# 2. a DAG acessar o PostgreSQL usando a connection banvic_dw.
+#
+# Os valores são criados localmente pelo script create-postgres-secret.sh
+# e nunca são armazenados neste arquivo versionado.
+secret:
+  - envName: TARGET_POSTGRES_HOST
+    secretName: airflow-runtime-secret
+    secretKey: TARGET_POSTGRES_HOST
+
+  - envName: TARGET_POSTGRES_PORT
+    secretName: airflow-runtime-secret
+    secretKey: TARGET_POSTGRES_PORT
+
+  - envName: TARGET_POSTGRES_DATABASE
+    secretName: airflow-runtime-secret
+    secretKey: TARGET_POSTGRES_DATABASE
+
+  - envName: TARGET_POSTGRES_USER
+    secretName: airflow-runtime-secret
+    secretKey: TARGET_POSTGRES_USER
+
+  - envName: TARGET_POSTGRES_PASSWORD
+    secretName: airflow-runtime-secret
+    secretKey: TARGET_POSTGRES_PASSWORD
+
+  - envName: AIRFLOW_CONN_BANVIC_DW
+    secretName: airflow-runtime-secret
+    secretKey: AIRFLOW_CONN_BANVIC_DW
+
+# Cria o usuário administrativo inicial usando credenciais mantidas
+# exclusivamente no Kubernetes Secret airflow-admin-secret.
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+  env:
+    - name: AIRFLOW_ADMIN_ROLE
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_ROLE
+
+    - name: AIRFLOW_ADMIN_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_USERNAME
+
+    - name: AIRFLOW_ADMIN_EMAIL
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_EMAIL
+
+    - name: AIRFLOW_ADMIN_FIRST_NAME
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_FIRST_NAME
+
+    - name: AIRFLOW_ADMIN_LAST_NAME
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_LAST_NAME
+
+    - name: AIRFLOW_ADMIN_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: airflow-admin-secret
+          key: AIRFLOW_ADMIN_PASSWORD
+
+  # O shell expande as variáveis vindas do Secret somente dentro do Job.
+  # Os valores não aparecem no arquivo versionado nem nos argumentos do Helm.
+  command:
+    - bash
+    - -c
+
+  args:
+    - |
+      set -euo pipefail
+
+      # O CLI do Airflow pode escrever mensagens adicionais antes do JSON.
+      # O parser procura o primeiro documento JSON que seja uma lista de usuários.
+      USER_STATE="$(
+        airflow users list --output json |
+        python3 -c '
+      import json
+      import os
+      import sys
+
+      output = sys.stdin.read()
+      decoder = json.JSONDecoder()
+      users = None
+
+      for index, character in enumerate(output):
+          if character not in "[{":
+              continue
+
+          try:
+              document, _ = decoder.raw_decode(output[index:])
+          except json.JSONDecodeError:
+              continue
+
+          if isinstance(document, list):
+              users = document
+              break
+
+      if users is None:
+          print(
+              "Erro: não foi possível localizar a lista JSON de usuários do Airflow.",
+              file=sys.stderr,
+          )
+          raise SystemExit(2)
+
+      username = os.environ["AIRFLOW_ADMIN_USERNAME"]
+
+      user_exists = any(
+          isinstance(user, dict) and user.get("username") == username
+          for user in users
+      )
+
+      print("exists" if user_exists else "missing")
+      '
+      )"
+
+      case "${USER_STATE}" in
+        exists)
+          echo "Usuário administrativo já existe; atualizando a senha."
+
+          airflow users reset-password \
+            -u "${AIRFLOW_ADMIN_USERNAME}" \
+            -p "${AIRFLOW_ADMIN_PASSWORD}"
+          ;;
+
+        missing)
+          echo "Usuário administrativo não encontrado; criando usuário."
+
+          airflow users create \
+            -r "${AIRFLOW_ADMIN_ROLE}" \
+            -u "${AIRFLOW_ADMIN_USERNAME}" \
+            -e "${AIRFLOW_ADMIN_EMAIL}" \
+            -f "${AIRFLOW_ADMIN_FIRST_NAME}" \
+            -l "${AIRFLOW_ADMIN_LAST_NAME}" \
+            -p "${AIRFLOW_ADMIN_PASSWORD}"
+          ;;
+
+        *)
+          echo "Erro: estado inesperado ao verificar o usuário administrativo." >&2
+          exit 1
+          ;;
+      esac
+
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false

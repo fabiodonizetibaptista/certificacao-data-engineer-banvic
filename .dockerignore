@@ -1,0 +1,9 @@
+.venv
+**/.venv
+meltano_project/.meltano
+meltano_project/.env
+data/extracted
+**/__pycache__
+**/*.pyc
+logs
+.git

@@ -5,7 +5,7 @@ executor: LocalExecutor
 enableServiceLinks: false
 
 # Mantém estável a chave utilizada internamente pela API do Airflow.
-# O Secret é criado localmente por create-airflow-api-secret.sh.
+# O Secret airflow-api-secret é provisionado declarativamente pelo Terraform.
 apiSecretKeySecretName: airflow-api-secret
 
 images:
@@ -49,7 +49,7 @@ triggerer:
 # 1. o Meltano carregar os dados por meio do target-postgres;
 # 2. a DAG acessar o PostgreSQL usando a connection banvic_dw.
 #
-# Os valores são criados localmente pelo script create-postgres-secret.sh
+# Os valores são fornecidos pelos Secrets provisionados declarativamente pelo Terraform.
 # e nunca são armazenados neste arquivo versionado.
 secret:
   - envName: TARGET_POSTGRES_HOST

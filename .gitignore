@@ -42,3 +42,16 @@ docs/archive/legacy_dags/
 infra/k8s/*.local.yaml
 infra/k8s/*.local.yml
 infra/k8s/*.local.env
+
+# Kind-generated kubeconfigs
+infra/terraform/cluster/*-config
+
+# Terraform local state and sensitive inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+*.tfplan
+crash.log
+crash.*.log

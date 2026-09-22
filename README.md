@@ -2,7 +2,7 @@
 
 Este repositório contém a solução desenvolvida para o desafio **Certificação Data Engineer by Indicium**, com foco na construção de uma prova de conceito reprodutível de infraestrutura e ingestão de dados para o Banco Vitória S.A. (BanVic).
 
-A solução executa localmente em Kubernetes com **Kind**, utiliza **Apache Airflow 3.2.2** para orquestração, **Meltano 4.2.0** para ELT e **PostgreSQL 16** como destino centralizado dos dados.
+A solução utiliza **Terraform** para provisionamento declarativo, executa localmente em Kubernetes com **Kind**, utiliza **Apache Airflow 3.2.2** para orquestração, **Meltano 4.2.0** para ELT e **PostgreSQL 16** como destino centralizado dos dados.
 
 ## 1. Objetivo do projeto
 
@@ -10,7 +10,7 @@ O objetivo é disponibilizar uma infraestrutura local, segura e reproduzível pa
 
 A solução contempla:
 
-- provisionamento de infraestrutura local em Kubernetes;
+- provisionamento declarativo da infraestrutura local com Terraform e Kubernetes;
 - execução do Airflow em ambiente conteinerizado;
 - ingestão ELT com Meltano, `tap-csv` e `target-postgres`;
 - armazenamento centralizado em PostgreSQL;
@@ -19,7 +19,7 @@ A solução contempla:
 - auditoria operacional por execução, task e tabela;
 - retries e callbacks para início, sucesso, nova tentativa e falha do Meltano;
 - idempotência por recriação controlada do schema de destino;
-- gerenciamento de credenciais com Kubernetes Secrets;
+- gerenciamento seguro de credenciais com Kubernetes Secrets, Terraform e launcher dedicado;
 - scripts SQL para validação dos dados e da auditoria.
 
 ## 2. Arquitetura da solução
@@ -30,16 +30,18 @@ A arquitetura separa o fluxo de dados das responsabilidades operacionais.
 
 | Componente | Papel |
 |---|---|
+| Terraform | Provisiona declarativamente o cluster Kind e os recursos da plataforma |
+| `scripts/deploy-platform.py` | Executa preflights de segurança e conduz o plan/apply da plataforma |
 | Docker | Constrói a imagem customizada do Airflow com Meltano e seus plugins |
-| Kind | Cria o cluster Kubernetes local |
+| Kind | Executa o cluster Kubernetes local |
 | Kubernetes | Orquestra os componentes da solução |
-| Apache Airflow 3.2.2 | Agenda, executa e monitora o pipeline |
+| Apache Airflow 3.2.2 | Orquestra, executa e monitora o pipeline |
 | Meltano 4.2.0 | Executa o processo ELT |
 | `tap-csv` | Extrai os sete arquivos CSV |
 | `target-postgres` | Carrega os registros no PostgreSQL analítico |
 | PostgreSQL do Airflow | Armazena metadados internos do Airflow |
 | PostgreSQL BanVic | Armazena os schemas `raw_banvic` e `control_banvic` |
-| Kubernetes Secrets | Mantêm credenciais e chaves fora do código versionado |
+| Kubernetes Secrets | Mantêm credenciais e chaves fora do código versionado, provisionados pelo Terraform |
 | Scripts SQL | Validam contagens e eventos de auditoria |
 
 A solução utiliza dois bancos PostgreSQL independentes:
@@ -56,6 +58,10 @@ do banco analítico.
 
 | Componente | Versão |
 |---|---:|
+| Terraform | `1.16.x` |
+| Provider `tehcyx/kind` | `0.11.0` |
+| Provider `hashicorp/kubernetes` | `3.2.1` |
+| Provider `hashicorp/helm` | `3.3.0` |
 | Imagem customizada | `banvic-airflow-meltano:0.6.4` |
 | Apache Airflow | `3.2.2` |
 | Meltano | `4.2.0` |
@@ -87,15 +93,32 @@ O pinning reduz variações entre instalações e torna a execução mais previs
 ├── infra/
 │   ├── airflow/
 │   │   └── Dockerfile
-│   └── k8s/
-│       ├── airflow-values.yaml
-│       ├── create-airflow-admin-secret.sh
-│       ├── create-airflow-api-secret.sh
-│       ├── create-postgres-secret.sh
-│       ├── namespace.yaml
-│       ├── postgres-deployment.yaml
-│       ├── postgres-pvc.yaml
-│       └── postgres-service.yaml
+│   ├── k8s/
+│   │   ├── airflow-values.yaml
+│   │   ├── create-airflow-admin-secret.sh
+│   │   ├── create-airflow-api-secret.sh
+│   │   ├── create-postgres-secret.sh
+│   │   ├── namespace.yaml
+│   │   ├── postgres-deployment.yaml
+│   │   ├── postgres-pvc.yaml
+│   │   └── postgres-service.yaml
+│   └── terraform/
+│       ├── cluster/
+│       │   ├── .terraform.lock.hcl
+│       │   ├── main.tf
+│       │   ├── outputs.tf
+│       │   ├── providers.tf
+│       │   ├── variables.tf
+│       │   └── versions.tf
+│       └── platform/
+│           ├── .terraform.lock.hcl
+│           ├── airflow.tf
+│           ├── namespace.tf
+│           ├── postgres.tf
+│           ├── providers.tf
+│           ├── secrets.tf
+│           ├── variables.tf
+│           └── versions.tf
 ├── meltano_project/
 │   ├── meltano.yml
 │   └── plugins/
@@ -103,6 +126,8 @@ O pinning reduz variações entre instalações e torna a execução mais previs
 │       │   └── tap-csv--meltanolabs.lock
 │       └── loaders/
 │           └── target-postgres--meltanolabs.lock
+├── scripts/
+│   └── deploy-platform.py
 ├── sql/
 │   ├── validate_audit_events.sql
 │   └── validate_raw_counts.sql
@@ -188,6 +213,16 @@ Identificador:
 ```text
 banvic_meltano_ingestion
 ```
+
+Configuração operacional:
+
+```text
+schedule = None
+catchup = False
+max_active_runs = 1
+```
+
+A execução é sob demanda nesta POC. O limite de uma execução ativa por vez evita concorrência entre full refreshes sobre o mesmo schema de destino.
 
 Fluxo:
 
@@ -278,31 +313,23 @@ A solução utiliza quatro Kubernetes Secrets:
 | `airflow-admin-secret` | Job de criação do usuário | credenciais administrativas da interface |
 | `airflow-api-secret` | API do Airflow | chave interna estática da API |
 
-Os scripts:
+O fluxo oficial de provisionamento dos Secrets é gerenciado pelo Terraform em conjunto com o launcher seguro `scripts/deploy-platform.py`.
 
-```text
-infra/k8s/create-postgres-secret.sh
-infra/k8s/create-airflow-admin-secret.sh
-infra/k8s/create-airflow-api-secret.sh
-```
+Launcher:
 
-implementam os seguintes controles:
+- solicita valores sensíveis sem exibir os valores no terminal;
+- gera a chave interna da API do Airflow em memória;
+- preserva Secrets existentes quando o estado persistente é coerente;
+- bloqueia a aplicação quando identifica um estado inconsistente que poderia resultar em sobrescrita acidental de credenciais;
+- cria o plano Terraform em diretório temporário com permissões restritas e aplica exatamente o plano gerado.
 
-- senhas digitadas sem exibição no terminal;
-- confirmação da senha administrativa;
-- geração criptograficamente segura da chave da API;
-- arquivos temporários criados com `umask 077`;
-- remoção automática dos temporários;
-- manifestos enviados diretamente ao Kubernetes;
-- ausência de arquivos YAML com credenciais no repositório;
-- preservação da chave da API para evitar rotação acidental;
-- preservação dos Secrets do PostgreSQL quando ambos já existem;
-- bloqueio da execução quando apenas um dos Secrets do PostgreSQL existe;
-- prevenção de sobrescrita acidental das credenciais do banco persistente.
+No Terraform, as variáveis que carregam segredos são marcadas como `sensitive` e `ephemeral`. No provedor Kubernetes, os Secrets utilizam atributos write-only, evitando a persistência dos valores sensíveis no state.
 
-Não use `admin/admin`. As credenciais válidas são aquelas definidas durante a execução do script administrativo.
+Os scripts legados em `infra/k8s` permanecem no repositório, mas não fazem parte do fluxo oficial de provisionamento documentado nesta versão.
 
-Também não execute comandos que imprimam Fernet Key, API key, senhas ou conteúdo completo de Secrets no terminal.
+Não use `admin/admin`. As credenciais válidas são as definidas no bootstrap pelo launcher seguro.
+
+Não execute comandos que imprimam Fernet Key, API key, senhas, tokens, strings de conexão ou o conteúdo completo de Secrets no terminal.
 
 ## 10. Execução local a partir de um ambiente limpo
 
@@ -313,136 +340,142 @@ Os comandos abaixo devem ser executados na raiz do repositório, em WSL ou Linux
 - Docker;
 - Kind;
 - `kubectl`;
-- Helm;
+- Terraform `1.16.x`;
 - Python 3;
 - Git.
 
-### 10.2 Criar o cluster Kind
-
-```bash
-kind create cluster \
-  --name banvic \
-  --image kindest/node:v1.35.0
-```
-
-Validar:
-
-```bash
-kubectl cluster-info --context kind-banvic
-kubectl config use-context kind-banvic
-```
-
-### 10.3 Criar o namespace
-
-```bash
-kubectl apply -f infra/k8s/namespace.yaml
-```
-
-### 10.4 Criar os Secrets do PostgreSQL
-
-```bash
-bash infra/k8s/create-postgres-secret.sh
-```
-
-Na instalação inicial, o script solicita a senha local e cria:
-
-```text
-postgres-secret
-airflow-runtime-secret
-```
-
-Os dois Secrets são tratados como um par. Quando ambos já existem, o script preserva as credenciais e termina sem alterações. Se apenas um deles existir, a execução é interrompida para impedir um estado inconsistente.
-
-Como o PostgreSQL utiliza armazenamento persistente, a rotação de senha deve ser coordenada entre o usuário interno do banco, `postgres-secret`, `airflow-runtime-secret` e os Pods consumidores. Alterar apenas um Secret não modifica automaticamente a senha já gravada no PostgreSQL.
-
-### 10.5 Subir o PostgreSQL analítico
-
-```bash
-kubectl apply -f infra/k8s/postgres-pvc.yaml
-kubectl apply -f infra/k8s/postgres-deployment.yaml
-kubectl apply -f infra/k8s/postgres-service.yaml
-```
-
-O PVC deve ser criado antes do Deployment. O volume `postgres-data` preserva os schemas `raw_banvic` e `control_banvic` durante recriações e atualizações do Pod.
-
-Aguardar disponibilidade:
-
-```bash
-kubectl rollout status \
-  deployment/postgres \
-  --namespace banvic \
-  --timeout 5m
-```
-
-### 10.6 Criar os Secrets do Airflow
-
-Criar as credenciais administrativas:
-
-```bash
-bash infra/k8s/create-airflow-admin-secret.sh
-```
-
-Criar a chave interna estática da API:
-
-```bash
-bash infra/k8s/create-airflow-api-secret.sh
-```
-
-Por padrão, o script da API preserva uma chave já existente. Uma rotação consciente pode ser feita com:
-
-```bash
-ROTATE_API_SECRET=true \
-bash infra/k8s/create-airflow-api-secret.sh
-```
-
-A rotação invalida tokens existentes e pode provocar reinícios dos componentes.
-
-### 10.7 Construir a imagem customizada
+### 10.2 Construir a imagem customizada
 
 ```bash
 docker build \
+  --no-cache \
+  --pull \
   --tag banvic-airflow-meltano:0.6.4 \
   --file infra/airflow/Dockerfile \
   .
 ```
 
-### 10.8 Carregar a imagem no Kind
+A imagem é construída a partir do conteúdo versionado no repositório antes do provisionamento do cluster.
+
+### 10.3 Provisionar o cluster Kind com Terraform
+
+Inicializar o root responsável pelo cluster:
+
+```bash
+terraform -chdir=infra/terraform/cluster init
+```
+
+Revisar o plano:
+
+```bash
+terraform -chdir=infra/terraform/cluster plan
+```
+
+Aplicar:
+
+```bash
+terraform -chdir=infra/terraform/cluster apply
+```
+
+Por padrão, o Terraform cria o cluster `banvic-local`, o contexto `kind-banvic-local` e o kubeconfig `~/.kube/banvic-local-config`.
+
+Validar o node:
+
+```bash
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  get nodes
+```
+
+O node deve atingir o estado `Ready`.
+
+### 10.4 Carregar a imagem no Kind
+
+Depois que o cluster estiver disponível, carregar a imagem customizada no node:
 
 ```bash
 kind load docker-image \
   banvic-airflow-meltano:0.6.4 \
-  --name banvic
+  --name banvic-local
 ```
 
-### 10.9 Instalar o Airflow
+O `airflow-values.yaml` utiliza `pullPolicy: Never`, portanto a imagem precisa estar disponível no node antes do provisionamento do Airflow.
+
+### 10.5 Inicializar o Terraform da plataforma
+
+Inicializar o segundo root Terraform:
 
 ```bash
-helm repo add apache-airflow https://airflow.apache.org
-helm repo update
+terraform -chdir=infra/terraform/platform init
 ```
 
+Esse root é responsável por:
+
+- namespace `banvic`;
+- Kubernetes Secrets;
+- PVC, Deployment e Service do PostgreSQL analítico;
+- release Helm do Apache Airflow.
+
+### 10.6 Revisar o plano da plataforma com o launcher seguro
+
+Executar:
+
 ```bash
-helm upgrade --install airflow apache-airflow/airflow \
-  --version 1.22.0 \
+python3 scripts/deploy-platform.py plan
+```
+
+No primeiro bootstrap, o launcher solicita sem exibir no terminal:
+
+- senha do PostgreSQL e confirmação;
+- senha do administrador do Airflow e confirmação.
+
+A chave interna da API do Airflow é gerada em memória.
+
+O launcher envia os valores sensíveis ao Terraform apenas no ambiente do subprocesso. As variáveis correspondentes são `sensitive` e `ephemeral`, e os Secrets utilizam atributos write-only para evitar a persistência dos valores no state.
+
+Em um cluster novo, a ausência do namespace `banvic` é tratada como estado válido de bootstrap. A criação do namespace permanece sob responsabilidade do Terraform.
+
+### 10.7 Provisionar a plataforma
+
+Executar:
+
+```bash
+python3 scripts/deploy-platform.py apply
+```
+
+O launcher executa os preflights de segurança, gera um plano Terraform temporário e aplica exatamente o plano gerado.
+
+### 10.8 Validar a plataforma Kubernetes
+
+Executar:
+
+```bash
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
   --namespace banvic \
-  --values infra/k8s/airflow-values.yaml \
-  --atomic \
-  --timeout 15m
+  get pods,pvc,jobs
 ```
 
-Validar:
+Resultado esperado:
 
-```bash
-kubectl get pods -n banvic
-```
+- PostgreSQL analítico em `Running`;
+- componentes ativos do Airflow em `Running`;
+- PVC `postgres-data` em `Bound`;
+- Jobs de migration e criação do usuário administrativo em `Complete`.
 
-Os componentes ativos do Airflow devem ficar em `Running`, e os Jobs de migration e criação de usuário devem terminar em `Succeeded`.
+### 10.9 Validar a DAG
 
-### 10.10 Validar a DAG
+Identificar o Pod do scheduler:
 
 ```bash
 SCHEDULER_POD="$(
-  kubectl get pods -n banvic \
+  kubectl \
+    --kubeconfig ~/.kube/banvic-local-config \
+    --context kind-banvic-local \
+    --namespace banvic \
+    get pods \
     -l component=scheduler \
     -o jsonpath='{.items[0].metadata.name}'
 )"
@@ -451,9 +484,11 @@ SCHEDULER_POD="$(
 Validar erros de importação:
 
 ```bash
-kubectl exec -n banvic \
-  -c scheduler \
-  "${SCHEDULER_POD}" -- \
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -c scheduler "${SCHEDULER_POD}" -- \
   airflow dags list-import-errors
 ```
 
@@ -466,9 +501,11 @@ No data found
 Confirmar a DAG:
 
 ```bash
-kubectl exec -n banvic \
-  -c scheduler \
-  "${SCHEDULER_POD}" -- \
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -c scheduler "${SCHEDULER_POD}" -- \
   airflow dags list |
 grep banvic_meltano_ingestion
 ```
@@ -477,23 +514,31 @@ A coluna `is_paused` deve aparecer como `False`. A DAG utiliza
 `is_paused_upon_creation=False`, portanto não é necessário executar
 `airflow dags unpause` após uma instalação limpa.
 
-### 10.11 Executar a DAG
+### 10.10 Executar a DAG
+
+A DAG foi configurada com `schedule=None`; nesta POC, a execução é manual e sob demanda.
+
+Disparar uma execução:
 
 ```bash
-kubectl exec -n banvic \
-  -c scheduler \
-  "${SCHEDULER_POD}" -- \
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -c scheduler "${SCHEDULER_POD}" -- \
   airflow dags trigger banvic_meltano_ingestion
 ```
 
 Anote o `run_id` retornado.
 
-Consultar execuções:
+Consultar as execuções:
 
 ```bash
-kubectl exec -n banvic \
-  -c scheduler \
-  "${SCHEDULER_POD}" -- \
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -c scheduler "${SCHEDULER_POD}" -- \
   airflow dags list-runs banvic_meltano_ingestion
 ```
 
@@ -503,12 +548,40 @@ Resultado esperado para a execução mais recente:
 state = success
 ```
 
+### 10.11 Validar a idempotência da infraestrutura
+
+Após o provisionamento, uma nova revisão dos dois roots Terraform deve resultar em ausência de mudanças.
+
+Validar a plataforma:
+
+```bash
+python3 scripts/deploy-platform.py plan
+```
+
+Validar o cluster:
+
+```bash
+terraform -chdir=infra/terraform/cluster plan
+```
+
+Resultado esperado em ambos os casos:
+
+```text
+No changes. Your infrastructure matches the configuration.
+```
+
+Essa validação confirma que reaplicar a configuração declarativa não produz alterações quando o ambiente já está aderente ao código versionado.
+
 ## 11. Validação dos dados carregados
 
 Executar a consulta sem imprimir a senha:
 
 ```bash
-kubectl exec -i -n banvic deployment/postgres -- sh -lc '
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -i deployment/postgres -- sh -lc '
   export PGPASSWORD="${POSTGRES_PASSWORD}"
 
   psql \
@@ -533,8 +606,14 @@ Resultado esperado:
 
 ## 12. Validação da auditoria
 
+Executar a consulta de auditoria sem imprimir a senha:
+
 ```bash
-kubectl exec -i -n banvic deployment/postgres -- sh -lc '
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  exec -i deployment/postgres -- sh -lc '
   export PGPASSWORD="${POSTGRES_PASSWORD}"
 
   psql \
@@ -547,19 +626,22 @@ kubectl exec -i -n banvic deployment/postgres -- sh -lc '
 
 A consulta deve retornar eventos recentes de:
 
-- criação ou validação da tabela de auditoria;
-- validação quantitativa dos arquivos fonte;
-- recriação do schema;
-- início e término do Meltano;
-- validação das tabelas carregadas.
+- criação ou validação da tabela `control_banvic.ingestion_audit`;
+- validação quantitativa dos sete arquivos fonte;
+- recriação do schema `raw_banvic`;
+- início e término da execução do Meltano;
+- validação das sete tabelas carregadas.
 
 ## 13. Acesso à interface do Airflow
 
+Executar o port-forward utilizando explicitamente o kubeconfig e o contexto do cluster:
+
 ```bash
-kubectl port-forward \
-  service/airflow-api-server \
-  8080:8080 \
-  --namespace banvic
+kubectl \
+  --kubeconfig ~/.kube/banvic-local-config \
+  --context kind-banvic-local \
+  --namespace banvic \
+  port-forward service/airflow-api-server 8080:8080
 ```
 
 Acessar:
@@ -568,11 +650,7 @@ Acessar:
 http://localhost:8080
 ```
 
-Utilize o usuário e a senha definidos por:
-
-```text
-infra/k8s/create-airflow-admin-secret.sh
-```
+Utilize o usuário administrativo configurado para o Airflow e a senha informada ao launcher seguro durante o bootstrap da plataforma. A credencial não deve ser registrada no repositório nem exibida no terminal.
 
 A interface permite acompanhar:
 
@@ -586,44 +664,66 @@ A interface permite acompanhar:
 
 ## 14. Evidências de funcionamento
 
-A versão `0.6.4` foi validada em 21 de julho de 2026 com:
+A versão `0.6.4` foi revalidada em **17 de setembro de 2026** a partir de um clone novo do repositório oficial, na branch `feature/banvic-second-chance-iac`.
 
-- Helm revision `3`;
-- Airflow `3.2.2`;
-- Meltano `4.2.0`;
-- Chart `1.22.0`;
-- imagem `banvic-airflow-meltano:0.6.4`;
-- `tap-csv` `1.2.0` fixado no commit `7af22d8e81ff2ac6bd391aec63fd1fef4eb24b22`;
-- `meltanolabs-target-postgres` `0.8.0`;
-- cinco tasks concluídas com `success`;
-- sete CSVs validados antes da carga;
-- sete tabelas validadas após a carga;
-- 18 eventos de auditoria;
-- `meltano_started` e `meltano_succeeded`;
-- contagens de origem e destino idênticas;
-- scheduler executado como `Deployment`, com logs locais em `emptyDir`;
-- PVC de logs de `100Gi` eliminado;
-- componentes do Airflow iniciados sem reinícios no rollout;
-- Secrets separados por responsabilidade;
-- chave estática da API do Airflow;
-- execução idempotente confirmada;
-- persistência do PostgreSQL validada após exclusão e recriação do Pod;
-- PVC analítico `postgres-data` mantido em estado `Bound`;
-- criação e preservação dos Secrets testadas nos cenários inicial, idempotente e inconsistente.
+As evidências observadas no gate técnico foram:
 
-Execução de referência:
+- build da imagem `banvic-airflow-meltano:0.6.4` concluído com `--no-cache` e `--pull`;
+- cluster `banvic-local` provisionado pelo Terraform com `1` recurso adicionado, `0` alterados e `0` destruídos;
+- node do Kind em estado `Ready`;
+- imagem customizada carregada explicitamente no node do Kind;
+- plataforma provisionada pelo launcher seguro com `9` recursos adicionados, `0` alterados e `0` destruídos;
+- PostgreSQL analítico e componentes ativos do Airflow em `Running`;
+- Jobs de migration e criação do usuário administrativo em `Complete`;
+- PVC analítico `postgres-data` em `Bound`;
+- DAG `banvic_meltano_ingestion` carregada e não pausada;
+- primeira execução manual concluída com `success`;
+- segunda execução manual concluída com `success`;
+- contagens de origem e destino idênticas nas duas execuções;
+- `18` eventos de auditoria registrados em `control_banvic.ingestion_audit` por execução;
+- ausência de multiplicação de linhas após a segunda execução, confirmando o comportamento idempotente do full refresh;
+- persistência do PostgreSQL confirmada após exclusão controlada do Pod e criação automática de um novo Pod pelo Deployment;
+- dados e eventos de auditoria preservados após a substituição do Pod;
+- `python3 scripts/deploy-platform.py plan` retornando `No changes`;
+- `terraform -chdir=infra/terraform/cluster plan` retornando `No changes`.
+
+Contagens validadas após as execuções:
+
+| Tabela | Registros |
+|---|---:|
+| `agencias` | 10 |
+| `clientes` | 998 |
+| `colaborador_agencia` | 100 |
+| `colaboradores` | 100 |
+| `contas` | 999 |
+| `propostas_credito` | 2.000 |
+| `transacoes` | 71.999 |
+
+Execuções de referência:
 
 ```text
-manual__validation_0_6_4_20260721T020827Z
+manual__2026-09-17T22:29:32.915628+00:00
+manual__2026-09-17T22:35:31.872995+00:00
 ```
 
-Estado final:
+Estado final de ambas:
 
 ```text
 success
 ```
 
+Essas evidências cobrem reprodutibilidade da infraestrutura, execução do pipeline, validação quantitativa, auditoria, idempotência e persistência do banco dentro do ciclo de vida do cluster local.
+
 ## 15. Decisões técnicas
+
+### Infraestrutura como código
+
+A infraestrutura foi separada em dois roots Terraform independentes:
+
+- `infra/terraform/cluster`: provisiona o cluster Kind `banvic-local`;
+- `infra/terraform/platform`: provisiona namespace, Secrets, PostgreSQL analítico e release Helm do Airflow.
+
+A separação reduz o acoplamento entre o ciclo de vida do cluster e o da plataforma. O build da imagem Docker e o `kind load docker-image` permanecem fora do Terraform por serem etapas de empacotamento e distribuição local da imagem, não recursos declarativos do cluster. Não são utilizados `local-exec` ou comandos imperativos ocultos dentro do Terraform.
 
 ### PostgreSQL e persistência
 
@@ -657,9 +757,19 @@ Os CSVs são copiados para a imagem porque o desafio utiliza um snapshot conheci
 
 A camada RAW preserva os valores da fonte majoritariamente como texto, evitando conversões indevidas de identificadores, documentos, contas e códigos. Uma camada refinada de produção deveria aplicar contratos, tipos de negócio, regras de qualidade e proteção de dados para consumo analítico.
 
-### Segregação de Secrets
+### Segregação e tratamento seguro de Secrets
 
-Cada componente recebe apenas as credenciais necessárias à sua função. Os Secrets do PostgreSQL são tratados como um par e não podem ser sobrescritos acidentalmente depois que o banco persistente foi inicializado.
+Cada componente recebe apenas as credenciais necessárias à sua função. O launcher `scripts/deploy-platform.py` concentra o fluxo de bootstrap e preservação das credenciais sem exibir valores sensíveis no terminal.
+
+As variáveis Terraform que carregam segredos são marcadas como `sensitive` e `ephemeral`. No provedor Kubernetes, os Secrets utilizam atributos write-only, evitando a persistência dos valores em planos ou no state Terraform.
+
+O launcher também valida a coerência do estado persistente antes de qualquer aplicação. Se o PVC analítico já existe mas as credenciais do PostgreSQL estão ausentes ou inconsistentes, o processo é interrompido para evitar a substituição acidental de credenciais de um banco já inicializado.
+
+### Execução sob demanda da POC
+
+A DAG `banvic_meltano_ingestion` utiliza `schedule=None`. Essa é uma decisão de escopo: o desafio utiliza um snapshot estático de arquivos CSV e a POC é executada sob demanda para demonstrar reprodutibilidade, idempotência, validação e auditoria.
+
+Em um cenário de produção, a cadência não deve ser inferida desta POC. Ela deve ser definida a partir do SLA do processo de negócio, da frequência de disponibilização da fonte e dos requisitos de atualização dos consumidores.
 
 ### Escopo analítico
 
@@ -677,6 +787,7 @@ Esta solução é uma POC local. Portanto:
 - as contagens fixas dos scripts SQL representam apenas o snapshot de aceitação do desafio;
 - o PVC `local-path` preserva dados na recriação do Pod, mas não após a exclusão do cluster Kind;
 - a exclusão do cluster Kind remove os recursos locais e exige novo provisionamento;
+- o state do Terraform é mantido localmente e não utiliza backend remoto com locking, criptografia e controle de acesso;
 - o ambiente depende dos recursos disponíveis no Docker Desktop e no WSL.
 
 Em produção, a evolução natural incluiria armazenamento de objetos, observabilidade centralizada, logs persistentes, secret manager, CI/CD, políticas de rede, backup e estratégia incremental.
@@ -684,11 +795,15 @@ Em produção, a evolução natural incluiria armazenamento de objetos, observab
 ## 17. Repositório
 
 ```text
-https://github.com/fabio-baptista/certificacao-data-engineer
+https://github.com/fabiodonizetibaptista/certificacao-data-engineer-banvic
 ```
 
 ## 18. Conclusão
 
-A solução entrega uma POC funcional e auditável de engenharia de dados para o BanVic, cobrindo infraestrutura local com Kubernetes, orquestração com Airflow, ingestão com Meltano, armazenamento em PostgreSQL, segurança por Secrets, validação de origem e destino, idempotência e monitoramento operacional.
+A solução entrega uma POC funcional, reprodutível e auditável de engenharia de dados para o BanVic, cobrindo provisionamento declarativo da infraestrutura com Terraform, Kubernetes com Kind, orquestração com Airflow, ingestão com Meltano, armazenamento em PostgreSQL, tratamento seguro de Secrets, validação, idempotência, persistência e auditoria operacional.
 
-O pipeline centraliza as sete entidades do desafio em um ambiente reproduzível e constitui uma base consistente para futuras camadas analíticas e consumo por ferramentas de BI.
+O cumprimento do gate técnico a partir de um clone limpo demonstra que o ambiente pode ser provisionado a partir do código versionado, que duas execuções consecutivas do pipeline preservam as contagens esperadas e que os eventos de auditoria e os dados persistem após a substituição do Pod do PostgreSQL.
+
+Do ponto de vista do negócio, a POC cria uma fundação centralizada, validada e rastreável sobre clientes, contas, transações, agências e crédito, permitindo que, em evoluções posteriores, a área Comercial e a Diretoria construam indicadores e análises confiáveis para apoiar retenção, atividade dos clientes e tomada de decisão.
+
+O escopo atual não pretende ser uma plataforma analítica de produção, e sim demonstrar uma base técnica confiável, reprodutível e extensível para evoluções futuras.
